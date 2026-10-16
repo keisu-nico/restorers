@@ -636,7 +636,8 @@ function startDrawing(){
   const cells=shuffle(G.myCells.slice());let idx=0;G.guideShown=true;
   const next=()=>{if(G.board)return;
     if(idx<cells.length)drawCell(cells[idx],idx,cells.length,png=>{toHost({t:"tile",cell:cells[idx],png});idx++;next()});
-    else{toHost({t:"drawDone"});screen="wait";renderWait()}};
+    // Show the waiting screen first: when the host is the last to finish, the next screen arrives synchronously
+    else{screen="wait";renderWait();toHost({t:"drawDone"})}};
   next();
 }
 
@@ -812,7 +813,7 @@ function renderGuess(){
     document.querySelectorAll(".cell").forEach(b=>b.onclick=()=>{const i=+b.dataset.i;if(mine.has(i))return;
       if(picked.has(i))picked.delete(i);else if(picked.size<need)picked.add(i);else return;
       const y=window.scrollY;paint();window.scrollTo(0,y)});
-    document.getElementById("ok").onclick=()=>{toHost({t:"guess",cells:[...picked]});G.phase="guess";screen="wait";renderWait()};
+    document.getElementById("ok").onclick=()=>{G.phase="guess";screen="wait";renderWait();toHost({t:"guess",cells:[...picked]})};
   };
   paint();
 }
