@@ -231,9 +231,9 @@ function plainTiles(work,N){
   if(!pixelCache[work.id]){const c=document.createElement("canvas");c.width=work.w;c.height=work.h;
     const x=c.getContext("2d",{willReadFrequently:true});x.imageSmoothingEnabled=false;x.drawImage(loaded[work.id],0,0);
     pixelCache[work.id]=x.getImageData(0,0,work.w,work.h).data}
-  const d=pixelCache[work.id],cw=work.w/N,ch=work.h/N,plain=new Set();
+  const d=pixelCache[work.id],cw=work.w/N,ch=work.h/N,plain=new Set(),near=nearestOf(work.palette);
   for(let i=0;i<N*N;i++){const x0=(i%N)*cw,y0=Math.floor(i/N)*ch,count=new Map();let best=0;
-    for(let y=y0;y<y0+ch;y++)for(let x=x0;x<x0+cw;x++){const p=(y*work.w+x)*4,k=(d[p]<<16)|(d[p+1]<<8)|d[p+2],v=(count.get(k)||0)+1;count.set(k,v);if(v>best)best=v}
+    for(let y=y0;y<y0+ch;y++)for(let x=x0;x<x0+cw;x++){const p=(y*work.w+x)*4,k=near(d[p],d[p+1],d[p+2]),v=(count.get(k)||0)+1;count.set(k,v);if(v>best)best=v}
     if(best/(cw*ch)>=PLAIN_SHARE)plain.add(i)}
   return plainCache[key]=plain;
 }
@@ -253,12 +253,21 @@ function colorFamilies(colors){
   const names={gray:"灰・黒",red:"赤",brown:"茶・肌",yellow:"黄",green:"緑",blue:"青・紫"};
   return Object.keys(fam).filter(k=>fam[k].length).map(k=>({name:names[k],colors:fam[k].sort((a,b)=>lum(a)-lum(b))}));
 }
+// Some browsers (Brave, privacy modes) add slight noise when a page reads canvas pixels,
+// so every pixel read is snapped to the nearest paint color instead of matched exactly
+const nearCache={};
+function nearestOf(palette){
+  const key=palette.join(),hit=nearCache[key];if(hit)return hit;
+  const rgb=palette.map(rgbOf),cache=new Map();
+  return nearCache[key]=(r,g,b)=>{const k=(r<<16)|(g<<8)|b;let v=cache.get(k);if(v!==undefined)return v;let bd=1e9;v=0;
+    for(let i=0;i<rgb.length;i++){const c=rgb[i],dd=(c[0]-r)**2+(c[1]-g)**2+(c[2]-b)**2;if(dd<bd){bd=dd;v=i}}
+    cache.set(k,v);return v};
+}
 function tileColors(data,palette){
-  const count=new Map(palette.map(c=>[c,0]));
-  for(let i=0;i<data.length;i+=4){const hex="#"+[data[i],data[i+1],data[i+2]].map(v=>v.toString(16).padStart(2,"0")).join("");
-    if(count.has(hex))count.set(hex,count.get(hex)+1)}
+  const near=nearestOf(palette),count=new Array(palette.length).fill(0);
+  for(let i=0;i<data.length;i+=4)count[near(data[i],data[i+1],data[i+2])]++;
   const total=data.length/4;
-  const used=[...count].filter(([,n])=>n/total>=.005).sort((a,b)=>b[1]-a[1]).map(([c])=>c);
+  const used=palette.map((c,i)=>[c,count[i]]).filter(([,n])=>n/total>=.005).sort((a,b)=>b[1]-a[1]).map(([c])=>c);
   return used.length?used:[palette[0]];
 }
 const maskCache={};
@@ -709,15 +718,21 @@ function drawCell(cell,k,total,done){
   swBtns.forEach(b=>b.onclick=()=>setColor(b.dataset.c));
   document.querySelectorAll("#sizes button").forEach(b=>b.onclick=()=>{size=+b.dataset.s;document.querySelectorAll("#sizes button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)))});
   eraserBtn.onclick=()=>{erasing=!erasing;eraserBtn.setAttribute("aria-pressed",String(erasing))};
-  const pushUndo=()=>{undo.push(ctx.getImageData(0,0,cw,ch));if(undo.length>40)undo.shift()};
-  document.getElementById("undo").onclick=()=>{const d=undo.pop();if(d)ctx.putImageData(d,0,0)};
+  // Undo keeps canvas copies rather than pixel reads, so no browser noise sneaks into the drawing
+  const pushUndo=()=>{const c2=document.createElement("canvas");c2.width=cw;c2.height=ch;c2.getContext("2d").drawImage(pad,0,0);
+    undo.push(c2);if(undo.length>40)undo.shift()};
+  document.getElementById("undo").onclick=()=>{const c2=undo.pop();if(c2){ctx.clearRect(0,0,cw,ch);ctx.drawImage(c2,0,0)}};
   document.getElementById("fill").onclick=()=>{pushUndo();ctx.fillStyle=erasing?PAPER:color;ctx.fillRect(0,0,cw,ch)};
   ref.addEventListener("pointerdown",e=>{
     const b=ref.getBoundingClientRect();
     const x=Math.max(0,Math.min(cw-1,Math.floor((e.clientX-b.left)/b.width*cw))),y=Math.max(0,Math.min(ch-1,Math.floor((e.clientY-b.top)/b.height*ch)));
-    const d=rc.getImageData(x,y,1,1).data;
-    const hex="#"+[d[0],d[1],d[2]].map(v=>v.toString(16).padStart(2,"0")).join("");
-    setColor(w.palette.includes(hex)?hex:color);
+    // Read a 3×3 patch and take the paint color most of it snaps to
+    const x0=Math.max(0,x-1),y0=Math.max(0,y-1),x1=Math.min(cw-1,x+1),y1=Math.min(ch-1,y+1);
+    const d=rc.getImageData(x0,y0,x1-x0+1,y1-y0+1).data,near=nearestOf(w.palette),votes=new Array(w.palette.length).fill(0);
+    for(let i=0;i<d.length;i+=4)votes[near(d[i],d[i+1],d[i+2])]++;
+    const center=near(...rc.getImageData(x,y,1,1).data.slice(0,3));
+    let best=center;votes.forEach((v,i)=>{if(v>votes[best])best=i});
+    setColor(w.palette[best]);
   });
   const stamp=(x,y)=>{const spans=discSpans(size),ox=Math.round(x-size/2),oy=Math.round(y-size/2);
     for(const [dy,dx,len] of spans)ctx.fillRect(ox+dx,oy+dy,len,1)};
