@@ -686,6 +686,7 @@ function drawCell(cell,k,total,done){
     <div class="sizes" id="sizes">${sizes.map((s,i)=>`<button data-s="${s}" aria-label="太さ ${s}ドット" aria-pressed="${i===1}"><i style="width:${[3,7,13,22][i]}px;height:${[3,7,13,22][i]}px"></i></button>`).join("")}</div>
     <span class="spacer"></span>
     ${G.guide?`<button class="tool" id="guideBtn" aria-pressed="${G.guideShown}">補助線</button>`:""}
+    <button class="tool" id="bucket" aria-pressed="false">バケツ</button>
     <button class="tool" id="eraser" aria-pressed="false">消しゴム</button>
     <button id="undo">元に戻す</button>
     <button id="fill">全面を塗る</button>
@@ -719,6 +720,31 @@ function drawCell(cell,k,total,done){
   swBtns.forEach(b=>b.onclick=()=>setColor(b.dataset.c));
   document.querySelectorAll("#sizes button").forEach(b=>b.onclick=()=>{size=+b.dataset.s;document.querySelectorAll("#sizes button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)))});
   eraserBtn.onclick=()=>{erasing=!erasing;eraserBtn.setAttribute("aria-pressed",String(erasing))};
+  // Bucket: fills the connected area of the tapped color. With the eraser on, it clears that area instead
+  let bucketOn=false;const bucketBtn=document.getElementById("bucket");
+  bucketBtn.onclick=()=>{bucketOn=!bucketOn;bucketBtn.setAttribute("aria-pressed",String(bucketOn))};
+  const bucketFill=(fx,fy)=>{
+    const sx=Math.floor(fx),sy=Math.floor(fy);if(sx<0||sy<0||sx>=cw||sy>=ch)return false;
+    const img=ctx.getImageData(0,0,cw,ch).data,k0=(sy*cw+sx)*4,tr=img[k0],tg=img[k0+1],tb=img[k0+2];
+    const fillHex=erasing?PAPER:color,[fr,fg,fb]=rgbOf(fillHex);
+    // A small tolerance keeps the fill working where a browser adds noise to pixel reads
+    const near=(r,g,b,R,G,B)=>(r-R)**2+(g-G)**2+(b-B)**2<=108;
+    if(near(tr,tg,tb,fr,fg,fb))return false;
+    const same=p=>{const k=p*4;return near(img[k],img[k+1],img[k+2],tr,tg,tb)};
+    const seen=new Uint8Array(cw*ch),stack=[sy*cw+sx];
+    ctx.fillStyle=fillHex;
+    while(stack.length){
+      const p=stack.pop();if(seen[p])continue;
+      const y=Math.floor(p/cw);let xl=p%cw,xr=xl;
+      while(xl>0&&!seen[y*cw+xl-1]&&same(y*cw+xl-1))xl--;
+      while(xr<cw-1&&!seen[y*cw+xr+1]&&same(y*cw+xr+1))xr++;
+      for(let x=xl;x<=xr;x++){seen[y*cw+x]=1;
+        if(y>0){const q=(y-1)*cw+x;if(!seen[q]&&same(q))stack.push(q)}
+        if(y<ch-1){const q=(y+1)*cw+x;if(!seen[q]&&same(q))stack.push(q)}}
+      ctx.fillRect(xl,y,xr-xl+1,1);
+    }
+    return true;
+  };
   // Undo keeps canvas copies rather than pixel reads, so no browser noise sneaks into the drawing
   const pushUndo=()=>{const c2=document.createElement("canvas");c2.width=cw;c2.height=ch;c2.getContext("2d").drawImage(pad,0,0);
     undo.push(c2);if(undo.length>40)undo.shift()};
@@ -741,7 +767,9 @@ function drawCell(cell,k,total,done){
     for(let i=1;i<=n;i++)stamp(a.x+(b.x-a.x)*i/n,a.y+(b.y-a.y)*i/n)};
   let drawing=false,last=null;
   const pos=e=>{const b=pad.getBoundingClientRect();return{x:(e.clientX-b.left)/b.width*cw,y:(e.clientY-b.top)/b.height*ch}};
-  pad.addEventListener("pointerdown",e=>{e.preventDefault();pad.setPointerCapture(e.pointerId);pushUndo();drawing=true;last=pos(e);
+  pad.addEventListener("pointerdown",e=>{e.preventDefault();
+    if(bucketOn){pushUndo();const pt=pos(e);if(!bucketFill(pt.x,pt.y))undo.pop();return}
+    pad.setPointerCapture(e.pointerId);pushUndo();drawing=true;last=pos(e);
     ctx.fillStyle=erasing?PAPER:color;stamp(last.x,last.y)});
   pad.addEventListener("pointermove",e=>{if(!drawing)return;ctx.fillStyle=erasing?PAPER:color;
     const pts=e.getCoalescedEvents?e.getCoalescedEvents():[];
