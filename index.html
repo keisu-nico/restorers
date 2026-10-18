@@ -468,11 +468,12 @@ function hostFinishDraw(){
   H.players.forEach((p,gi)=>{H.need[gi]=drawn-H.owner.filter(o=>o===gi).length});
   present().forEach(p=>{const gi=H.players.indexOf(p);sendTo(p.id,{t:"board",tiles:board,need:H.need[gi]})});
   hostProgress();
-  H.timer=setTimeout(hostFinish,10*60*1000);
+  H.timer=setTimeout(hostFinish,(REVEAL_SECONDS+GUESS_SECONDS+15)*1000);
 }
 function hostCheckGuessed(){if(H&&H.phase==="guess"&&present().every(p=>H.guesses[H.players.indexOf(p)]))hostFinish()}
 function hostFinish(){
   if(!H||H.phase!=="guess")return;clearTimeout(H.timer);H.phase="result";
+  present().forEach(p=>{const gi=H.players.indexOf(p);if(!H.guesses[gi])H.guesses[gi]=[]});
   broadcast({t:"result",owner:H.owner,guesses:H.guesses,left:[...H.left]});
 }
 function hostBackToLobby(){if(H&&H.timer)clearTimeout(H.timer);H=null;broadcast({t:"toLobby"});hostLobbyChanged()}
@@ -605,7 +606,7 @@ function renderLobby(){
         <ol>
           <li>全員が同時に、割り当てられたマスを1マスずつ制限時間内に模写します。</li>
           <li>全員が描き終えると、原画と手描きのマスが混ざった合作が公開されます。</li>
-          <li>自分以外の人が描いたと思うマスを、決められた枚数だけ選びます。</li>
+          <li>合作は5秒間公開されたあと推理に移ります。自分以外の人が描いたと思うマスを、30秒以内に決められた枚数だけ選びます。</li>
           <li>得点:手描きのマスを当てるたびに+1点。自分のマスを見逃した人1人につき、1マスごとに+1点。</li>
         </ol>
       </div>
@@ -808,6 +809,19 @@ function renderWait(){
   </section>`);
 }
 
+/* ---------- Phase timers ---------- */
+const REVEAL_SECONDS=5,GUESS_SECONDS=30;
+// Runs a countdown on the shared timer: tick(msLeft) on every beat, end() once at zero
+function countdown(ms,tick,end){
+  clearInterval(timerId);const t0=Date.now();let over=false;
+  const beat=()=>{const left=Math.max(0,ms-(Date.now()-t0));tick(left);if(left<=0&&!over){over=true;clearInterval(timerId);end()}};
+  timerId=setInterval(beat,200);beat();
+  return()=>{over=true;clearInterval(timerId)};
+}
+const timerHTML=(left,total)=>`<div class="timer${left<=10000?" hurry":""}" id="timer"><div class="bar"><i id="barfill" style="width:${left/total*100}%"></i></div><output id="tleft">${Math.ceil(left/1000)}</output></div>`;
+function paintTimer(left,total){const f=document.getElementById("barfill"),o=document.getElementById("tleft"),t=document.getElementById("timer");
+  if(f)f.style.width=(left/total*100)+"%";if(o)o.textContent=Math.ceil(left/1000);if(t)t.classList.toggle("hurry",left<=10000)}
+
 /* ---------- Board ---------- */
 function boardHTML(tiles,opts={}){
   const N=G.N;
@@ -822,26 +836,30 @@ function renderReveal(){
     <span class="eyebrow">修復完了</span>
     <h2>${G.players.length}人の修復による「${esc(G.work.title)}」</h2>
     <div class="boardwrap" style="max-width:${G.work.w>G.work.h?680:520}px">${boardHTML(G.board,{flip:true,order})}</div>
-    <p class="muted" style="max-width:32em">どのマスが手描きか、よく見てください。準備ができたら推理に進みます。</p>
-    <button class="primary" id="go">推理へ進む</button>
+    <p class="muted" style="max-width:32em">どのマスが手描きか、よく見てください。${REVEAL_SECONDS}秒後に推理が始まります。</p>
+    <button class="primary" id="go">推理へ進む(<span id="cd">${REVEAL_SECONDS}</span>)</button>
   </section>`);
-  document.getElementById("go").onclick=renderGuess;
+  const stop=countdown(REVEAL_SECONDS*1000,left=>{const e=document.getElementById("cd");if(e)e.textContent=Math.ceil(left/1000)},renderGuess);
+  document.getElementById("go").onclick=()=>{stop();renderGuess()};
 }
 
 /* ---------- Guess ---------- */
 function renderGuess(){
   screen="guess";
-  const need=G.need,picked=new Set(),mine=new Set(G.myCells);
+  const need=G.need,picked=new Set(),mine=new Set(G.myCells),total=GUESS_SECONDS*1000;
+  let left=total,sent=false;
+  // Submits whatever is picked; on time-out that may be fewer than asked for
+  const submit=()=>{if(sent)return;sent=true;stop();G.phase="guess";screen="wait";renderWait();toHost({t:"guess",cells:[...picked]})};
   const paint=()=>{
-    h(`<div style="display:flex;flex-direction:column;gap:4px">
+    h(`<div class="drawhead"><div style="display:flex;flex-direction:column;gap:4px">
         <span class="eyebrow">推理 · ${esc(G.players[G.me].name)} さん</span>
-        <h2>手描きのマスはどれ?</h2></div>
+        <h2>手描きのマスはどれ?</h2></div>${timerHTML(left,total)}</div>
       <section class="two">
         <div class="boardwrap">${boardHTML(G.board,{clickable:true,locked:i=>mine.has(i),picked:i=>picked.has(i),
           tag:i=>mine.has(i)?`<span class="tag" style="background:${PLAYER_COLORS[G.me]}">自分</span>`
             :picked.has(i)?`<span class="tag" style="background:var(--gilt)">手描き?</span>`:""})}</div>
         <div style="display:flex;flex-direction:column;gap:14px">
-          <p class="muted">ほかの人が描いたと思うマスを ${need}枚タップしてください。もう一度タップすると選択を外せます。斜線のマスはあなたが描いた場所です。</p>
+          <p class="muted">ほかの人が描いたと思うマスを ${need}枚タップしてください。もう一度タップすると選択を外せます。斜線のマスはあなたが描いた場所です。制限時間の${GUESS_SECONDS}秒が過ぎると、その時点で選んでいるマスで確定します。</p>
           <p class="bignum">${picked.size} <span class="muted" style="font-size:.55em">/ ${need}枚</span></p>
           <button class="primary" id="ok" ${picked.size===need?"":"disabled"}>推理を確定する</button>
         </div>
@@ -849,9 +867,10 @@ function renderGuess(){
     document.querySelectorAll(".cell").forEach(b=>b.onclick=()=>{const i=+b.dataset.i;if(mine.has(i))return;
       if(picked.has(i))picked.delete(i);else if(picked.size<need)picked.add(i);else return;
       const y=window.scrollY;paint();window.scrollTo(0,y)});
-    document.getElementById("ok").onclick=()=>{G.phase="guess";screen="wait";renderWait();toHost({t:"guess",cells:[...picked]})};
+    document.getElementById("ok").onclick=submit;
   };
   paint();
+  const stop=countdown(total,l=>{left=l;paintTimer(l,total)},submit);
 }
 
 /* ---------- Result ---------- */
