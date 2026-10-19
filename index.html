@@ -206,6 +206,12 @@ td.total{font-family:var(--display);font-size:20px;font-weight:800}
 .facts{display:flex;flex-wrap:wrap;gap:6px}
 .facts span{font-size:12px;padding:3px 9px;border-radius:99px;background:var(--wall-2);border:1px solid var(--line)}
 .status{font-size:12px;color:var(--muted)}
+.member .chip{flex:none;font-size:10px;font-weight:700;padding:1px 6px;border-radius:99px;border:1px solid var(--line);color:var(--muted);margin-left:auto}
+.member .chip+small,.member .chip+.chip{margin-left:4px}
+.member .chip.warn{border-color:var(--alarm);color:var(--alarm)}
+.member .chip.relay{border-color:var(--gilt);color:var(--gilt)}
+.netbanner{position:fixed;left:0;right:0;bottom:0;z-index:60;background:var(--alarm);color:#1c1611;font-weight:700;text-align:center;
+  padding:10px max(16px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
 .solo{flex-direction:row;align-items:center;justify-content:space-between;flex-wrap:wrap}
 .gridover.pick{pointer-events:auto}
 .gridover.pick button{border:1px solid rgba(240,230,210,.35);border-radius:0;background:transparent;padding:1px 3px;font-size:10px;line-height:1.2;color:rgba(240,230,210,.85);text-shadow:0 1px 2px #000;display:flex;align-items:flex-start;justify-content:flex-start;min-width:0}
@@ -254,9 +260,11 @@ const workOf=id=>WORKS.find(w=>w.id===id)||WORKS[0];
 const cellName=(i,N)=>LETTERS[i%N]+(Math.floor(i/N)+1);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
-const h=html=>{app.classList.remove("wide");app.innerHTML=html;window.scrollTo(0,0)};
+const h=html=>{app.classList.remove("wide");app.innerHTML=html;window.scrollTo(0,0);setTimeout(syncWake,0)};
 const isPng=s=>typeof s==="string"&&s.startsWith("data:image/png;base64,")&&s.length<3e6;
 const dot=(pi,size=12)=>{const s=typeof size==="number"?size+"px":size;return `<span class="dot" style="display:inline-block;width:${s};height:${s};vertical-align:middle;background:${PLAYER_COLORS[pi%8]}"></span>`};
+const statusChip=pid=>L.status[pid]==="away"?`<span class="chip warn">再接続待ち</span>`:L.status[pid]==="unstable"?`<span class="chip warn">不安定</span>`:"";
+const routeChip=pid=>L.route[pid]==="relay"?`<span class="chip relay">中継</span>`:L.route[pid]==="direct"?`<span class="chip">直接</span>`:"";
 // Everything below arrives from other players' browsers, so it is coerced to known shapes before use
 function cleanSettings(s){s=s||{};return{work:workOf(String(s.work)).id,grid:[4,5,6].includes(s.grid)?s.grid:4,per:[1,2,3].includes(s.per)?s.per:1,
   seconds:[60,90,120,180].includes(s.seconds)?s.seconds:90,guide:!!s.guide,peek:!!s.peek}}
@@ -327,25 +335,63 @@ function discSpans(d){
 }
 
 /* ---------- Network state ---------- */
-const me={name:store.get("shufukushi-name")||"",id:null};
-let net=null;          // {peer,isHost,code,conns:Map (host) | host:conn (guest)}
-let L={players:[],settings:{work:"mona",grid:4,per:1,seconds:90,guide:false,peek:false}}; // lobby, host is authority
+// Every player has a public id (pid) the host hands out, and a private seat token the browser keeps per room.
+// The seat lets a player who dropped out come back to the same place in the game.
+const me={name:store.get("shufukushi-name")||"",pid:null,seat:null};
+const HOST_PID="h";
+let net=null;          // host: {peer,isHost,code,conns,peerToPid,bySeat,status,route}  guest: {peer,isHost,code,host,joined,outbox,giveUp}
+let L={players:[],settings:{work:"mona",grid:4,per:1,seconds:90,guide:false,peek:false},status:{},route:{}}; // lobby, host is authority
 let H=null;            // host-only game record
 let G=null;            // this player's view of the current game
 let screen="home",timerId=null;
+const seatKey=code=>"shufukushi-seat-"+code;
+function seatFor(code){let s=store.get(seatKey(code));
+  if(!s){s=Math.random().toString(36).slice(2)+Math.random().toString(36).slice(2);store.set(seatKey(code),s)}return s}
 
-function toHost(msg){ if(net.isHost)hostRecv(me.id,msg); else net.host.send(msg) }
-function sendTo(id,msg){ if(id===me.id)guestRecv(msg); else{const c=net.conns.get(id);if(c&&c.open)c.send(msg)} }
+function toHost(msg){
+  if(!net)return;
+  if(net.isHost){hostRecv(HOST_PID,msg);return}
+  if(net.joined&&!rc.active&&net.host&&net.host.open){try{net.host.send(msg);return}catch(e){}}
+  net.outbox.push(msg); // delivered once the connection is back
+}
+function sendTo(pid,msg){ if(pid===me.pid)guestRecv(msg); else if(net&&net.conns){const c=net.conns.get(pid);if(c&&c.open)try{c.send(msg)}catch(e){}} }
 function broadcast(msg){ L.players.forEach(p=>sendTo(p.id,msg)) }
 
 function leaveRoom(){
-  clearInterval(timerId);clearInterval(beatId);lastSeen.clear();
+  clearInterval(timerId);clearInterval(beatId);clearTimeout(rc.timer);rc.active=false;hideBanner();lastSeen.clear();
   if(H&&H.timer)clearTimeout(H.timer);
-  if(net&&net.peer){try{net.peer.destroy()}catch(e){}}
-  net=null;H=null;G=null;L.players=[];
+  const n=net;net=null;H=null;G=null;L.players=[];L.status={};L.route={};
+  if(n){
+    // Say goodbye so others don't wait out the reconnect window for someone who left on purpose
+    try{if(n.isHost)n.conns.forEach(c=>{try{c.send({t:"closed"})}catch(e){}});else if(n.host&&n.host.open)n.host.send({t:"bye"})}catch(e){}
+    setTimeout(()=>{try{n.peer.destroy()}catch(e){}},300);
+    if(!n.isHost)store.set(seatKey(n.code),"");
+  }
   history.replaceState(null,"",location.pathname+location.search);
   renderHome();
 }
+
+/* ---------- Keep the screen on while playing ---------- */
+let wakeLock=null;
+const AWAKE_SCREENS=new Set(["intro","draw","wait","reveal","guess"]);
+async function syncWake(){
+  const want=AWAKE_SCREENS.has(screen)&&document.visibilityState==="visible";
+  try{
+    if(want&&!wakeLock&&navigator.wakeLock){wakeLock=await navigator.wakeLock.request("screen");wakeLock.addEventListener("release",()=>{wakeLock=null})}
+    else if(!want&&wakeLock){const w=wakeLock;wakeLock=null;await w.release()}
+  }catch(e){wakeLock=null}
+}
+document.addEventListener("visibilitychange",()=>{
+  syncWake();
+  // Coming back from another app: check the host is still there right away
+  if(document.visibilityState==="visible"&&net&&!net.isHost&&net.joined&&!rc.active&&Date.now()-(lastSeen.get("host")||0)>UNSTABLE)startReconnect();
+});
+
+/* ---------- Connection banner ---------- */
+function showBanner(text){let b=document.getElementById("netbanner");
+  if(!b){b=document.createElement("div");b.id="netbanner";b.className="netbanner";b.setAttribute("role","status");document.body.appendChild(b)}
+  b.textContent=text}
+function hideBanner(){const b=document.getElementById("netbanner");if(b)b.remove()}
 
 /* ---------- Home ---------- */
 function renderHome(msg=""){
@@ -530,21 +576,29 @@ function createRoom(tries=0){
   const code=[...Array(4)].map(()=>CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)]).join("");
   renderConnecting("部屋を準備しています…");
   const peer=new Peer(ROOM_PREFIX+code,PEER_OPTS);
-  peer.on("open",id=>{
-    net={peer,isHost:true,code,conns:new Map()};me.id=id;
-    L.players=[{id,name:me.name}];startHeartbeat();
+  peer.on("open",()=>{
+    net={peer,isHost:true,code,conns:new Map(),peerToPid:new Map(),bySeat:new Map(),status:new Map(),route:new Map()};
+    me.pid=HOST_PID;me.seat=null;
+    L.players=[{id:HOST_PID,name:me.name}];L.status={};L.route={};
+    startHeartbeat();
     history.replaceState(null,"",location.pathname+location.search+"#"+code);
     renderLobby();
   });
   peer.on("connection",conn=>{
-    conn.on("data",d=>hostRecv(conn.peer,d,conn));
-    conn.on("close",()=>hostDrop(conn.peer));
-    conn.on("error",()=>hostDrop(conn.peer));
+    conn.on("data",d=>{
+      if(!net||!net.isHost)return;
+      if(d&&d.t==="hello"){hostHello(conn,d);return}
+      const pid=net.peerToPid.get(conn.peer);
+      if(pid&&net.conns.get(pid)===conn)hostRecv(pid,d);
+    });
+    const lost=()=>{if(!net||!net.isHost)return;const pid=net.peerToPid.get(conn.peer);if(pid&&net.conns.get(pid)===conn)hostMarkAway(pid)};
+    conn.on("close",lost);conn.on("error",lost);
   });
+  // Losing the matchmaking server only stops new arrivals; reconnect so returning players can find the room
   peer.on("disconnected",()=>{try{peer.reconnect()}catch(e){}});
   peer.on("error",err=>{
     if(err.type==="unavailable-id"&&tries<5){peer.destroy();createRoom(tries+1);return}
-    if(net&&net.peer===peer&&["peer-unavailable","webrtc"].includes(err.type))return;
+    if(net&&net.peer===peer)return;
     peer.destroy();net=null;renderHome(netErrorText(err));
   });
 }
@@ -554,53 +608,118 @@ function netErrorText(err){
   return "接続できませんでした("+err.type+")。もう一度試してください。";
 }
 
-// Heartbeat: the host pings every 4s; anyone silent for 20s is treated as gone (tabs closed without a goodbye)
-const HEARTBEAT=4000,SILENCE=20000;
-let beatId=null;
+/* ---------- Heartbeat and connection health ---------- */
+// The host pings every 3s and each guest answers. Silent for 10s: shown as unstable.
+// Silent for 45s: treated as gone, but they can still come back with the same seat or name.
+const HEARTBEAT=3000,UNSTABLE=10000,GRACE=45000,RECONNECT_FOR=60000;
+let beatId=null,beatCount=0;
 const lastSeen=new Map();
-function startHeartbeat(){
-  clearInterval(beatId);
-  beatId=setInterval(()=>{
-    if(!net){clearInterval(beatId);return}
-    if(net.isHost){
-      net.conns.forEach((c,id)=>{try{c.send({t:"ping"})}catch(e){}
-        if(Date.now()-(lastSeen.get(id)||Date.now())>SILENCE){try{c.close()}catch(e){}hostDrop(id)}});
-    }else{
-      try{net.host.send({t:"pong"})}catch(e){}
-      if(Date.now()-(lastSeen.get("host")||Date.now())>SILENCE)lostHost();
-    }},HEARTBEAT);
-}
-function hostRecv(from,d,conn){
-  if(!d||typeof d!=="object")return;
-  if(from!==me.id)lastSeen.set(from,Date.now());
-  if(d.t==="pong")return;
-  const pi=L.players.findIndex(p=>p.id===from);
-  if(d.t==="hello"){
-    if(conn){
-      if(H){conn.on("open",()=>{});sendRaw(conn,{t:"refused",reason:"この部屋はゲームの途中です。終わるまで待ってから入り直してください。"});return}
-      if(L.players.length>=MAX_PLAYERS){sendRaw(conn,{t:"refused",reason:"この部屋は満員です(8人まで)。"});return}
-      net.conns.set(from,conn);lastSeen.set(from,Date.now());
-      if(pi<0)L.players.push({id:from,name:String(d.name||"修復士").slice(0,10)});
-    }
-    hostLobbyChanged();return;
+const rc={active:false,since:0,timer:null};
+function startHeartbeat(){clearInterval(beatId);beatId=setInterval(beat,HEARTBEAT)}
+function beat(){
+  if(!net){clearInterval(beatId);return}
+  beatCount++;
+  if(net.isHost){
+    let changed=false;
+    L.players.slice().forEach(p=>{
+      if(p.id===HOST_PID)return;
+      const c=net.conns.get(p.id);if(c&&c.open)try{c.send({t:"ping"})}catch(e){}
+      const age=Date.now()-(lastSeen.get(p.id)||Date.now());
+      if(age>GRACE){hostGone(p.id);return}
+      const st=(!c||!c.open)?"away":age>UNSTABLE?"unstable":"ok";
+      if(net.status.get(p.id)!==st){net.status.set(p.id,st);changed=true}
+      if(beatCount%5===0&&c&&c.open)measureRoute(p.id,c,0);
+    });
+    if(changed)broadcastStatus();
+  }else{
+    if(net.joined&&net.host&&net.host.open&&!rc.active)try{net.host.send({t:"pong"})}catch(e){}
+    if(net.joined&&!rc.active&&Date.now()-(lastSeen.get("host")||Date.now())>UNSTABLE)startReconnect();
   }
-  if(!H||pi<0)return;
-  const gi=H.players.findIndex(p=>p.id===from);if(gi<0)return;
+}
+function broadcastStatus(){
+  if(!net||!net.isHost)return;
+  broadcast({t:"status",status:Object.fromEntries(net.status),route:Object.fromEntries(net.route)});
+}
+// Direct or relayed: read from the WebRTC stats of the selected candidate pair
+async function routeOf(pc){
+  if(!pc||!pc.getStats)return null;
+  const stats=await pc.getStats(),byId={};let pair=null;
+  stats.forEach(s=>{byId[s.id]=s});
+  stats.forEach(s=>{if(s.type==="transport"&&s.selectedCandidatePairId&&byId[s.selectedCandidatePairId])pair=byId[s.selectedCandidatePairId]});
+  if(!pair)stats.forEach(s=>{if(!pair&&s.type==="candidate-pair"&&(s.selected||(s.nominated&&s.state==="succeeded")))pair=s});
+  if(!pair)return null;
+  const l=byId[pair.localCandidateId],r=byId[pair.remoteCandidateId];
+  return (l&&l.candidateType==="relay")||(r&&r.candidateType==="relay")?"relay":"direct";
+}
+function measureRoute(pid,conn,delay=1500){
+  setTimeout(async()=>{try{const k=await routeOf(conn.peerConnection);
+    if(k&&net&&net.isHost&&net.conns.get(pid)===conn&&net.route.get(pid)!==k){net.route.set(pid,k);broadcastStatus()}}catch(e){}},delay);
+}
+
+/* ---------- Host: arrivals, returns, departures ---------- */
+function hostHello(conn,d){
+  const seat=String(d.seat||"").slice(0,64),name=(String(d.name||"").slice(0,10))||"修復士";
+  let pid=seat?net.bySeat.get(seat):null;
+  if(!pid){
+    // Same name as someone who is not connected right now: give them that place back
+    const known=[...L.players,...(H?H.players:[])];
+    const cand=known.find(p=>p.id!==HOST_PID&&p.name===name&&!(net.status.get(p.id)==="ok"&&net.conns.get(p.id)&&net.conns.get(p.id).open));
+    if(cand){pid=cand.id;if(seat)net.bySeat.set(seat,pid)}
+  }
+  if(pid){
+    const inLobby=L.players.some(p=>p.id===pid);
+    if(!inLobby&&!H&&L.players.length>=MAX_PLAYERS){sendRaw(conn,{t:"refused",reason:"この部屋は満員です(8人まで)。"});return}
+    const old=net.conns.get(pid);
+    net.conns.set(pid,conn);net.peerToPid.set(conn.peer,pid);lastSeen.set(pid,Date.now());net.status.set(pid,"ok");
+    if(old&&old!==conn)try{old.close()}catch(e){}
+    if(!inLobby){const rec=(H&&H.players.find(p=>p.id===pid))||{name};L.players.push({id:pid,name:rec.name})}
+    if(H)H.left.delete(pid);
+    sendTo(pid,{t:"welcome",pid});
+    hostLobbyChanged();
+    if(H){sendTo(pid,hostResume(pid));hostProgress()}
+    measureRoute(pid,conn);
+    return;
+  }
+  if(H){sendRaw(conn,{t:"refused",reason:"この部屋はゲームの途中です。終わるまで待ってから入り直してください。"});return}
+  if(L.players.length>=MAX_PLAYERS){sendRaw(conn,{t:"refused",reason:"この部屋は満員です(8人まで)。"});return}
+  pid="p"+Math.random().toString(36).slice(2,9);
+  if(seat)net.bySeat.set(seat,pid);
+  net.conns.set(pid,conn);net.peerToPid.set(conn.peer,pid);lastSeen.set(pid,Date.now());net.status.set(pid,"ok");
+  L.players.push({id:pid,name});
+  sendTo(pid,{t:"welcome",pid});
+  hostLobbyChanged();
+  measureRoute(pid,conn);
+}
+function hostMarkAway(pid){if(net.status.get(pid)!=="away"){net.status.set(pid,"away");broadcastStatus()}}
+function hostRecv(pid,d){
+  if(!d||typeof d!=="object"||!net)return;
+  if(pid!==HOST_PID){
+    lastSeen.set(pid,Date.now());
+    const c=net.conns.get(pid);
+    if(net.status.get(pid)!=="ok"&&c&&c.open){net.status.set(pid,"ok");broadcastStatus()}
+  }
+  if(d.t==="pong")return;
+  if(d.t==="bye"){hostGone(pid,true);return}
+  if(!H)return;
+  const gi=H.players.findIndex(p=>p.id===pid);if(gi<0||H.left.has(pid))return;
   if(d.t==="tile"&&H.phase==="draw"){const c=d.cell|0;if(H.owner[c]===gi&&isPng(d.png))H.tiles[c]=d.png}
-  if(d.t==="drawDone"&&H.phase==="draw"){H.drawDone.add(from);hostProgress();hostCheckDrawn()}
+  if(d.t==="drawDone"&&H.phase==="draw"){H.drawDone.add(pid);hostProgress();hostCheckDrawn()}
   if(d.t==="guess"&&H.phase==="guess"&&Array.isArray(d.cells)){
     H.guesses[gi]=[...new Set(d.cells.map(x=>x|0))].filter(c=>c>=0&&c<H.N*H.N&&H.owner[c]!==gi).slice(0,H.need[gi]);
     hostProgress();hostCheckGuessed()}
 }
 function sendRaw(conn,msg){const go=()=>{try{conn.send(msg)}catch(e){}setTimeout(()=>{try{conn.close()}catch(e){}},500)};conn.open?go():conn.on("open",go)}
 
-function hostDrop(id){
-  if(!net||!net.isHost)return;
-  net.conns.delete(id);
-  const before=L.players.length;L.players=L.players.filter(p=>p.id!==id);
+// Gone for good (or left on purpose): free the place in the lobby; in a game, stop waiting for them
+function hostGone(pid,leftOnPurpose){
+  if(!net||!net.isHost||pid===HOST_PID)return;
+  const c=net.conns.get(pid);net.conns.delete(pid);if(c)try{c.close()}catch(e){}
+  net.status.delete(pid);net.route.delete(pid);lastSeen.delete(pid);
+  if(leftOnPurpose)for(const [s,p] of net.bySeat)if(p===pid)net.bySeat.delete(s);
+  const before=L.players.length;L.players=L.players.filter(p=>p.id!==pid);
   if(before===L.players.length)return;
   if(!H){hostLobbyChanged();return}
-  H.left.add(id);hostProgress();
+  H.left.add(pid);hostProgress();broadcastStatus();
   if(H.phase==="draw")hostCheckDrawn();else if(H.phase==="guess")hostCheckGuessed();
 }
 // Keep settings valid for the current head count, then tell everyone
@@ -608,7 +727,7 @@ function hostLobbyChanged(){
   const s=L.settings,n=Math.max(2,L.players.length),w=workOf(s.work);
   while(!fits(n,1,s.grid,w)&&s.grid<6)s.grid++;
   while(!fits(n,s.per,s.grid,w)&&s.per>1)s.per--;
-  broadcast({t:"lobby",players:L.players,settings:s,code:net.code});
+  broadcast({t:"lobby",players:L.players,settings:s,code:net.code,status:Object.fromEntries(net.status),route:Object.fromEntries(net.route)});
 }
 
 /* ---------- Host: game ---------- */
@@ -618,98 +737,174 @@ function hostStart(){
   const owner=Array(N*N).fill(-1),plain=plainTiles(work,N);
   const pool=shuffle([...Array(N*N).keys()].filter(i=>!plain.has(i)));
   for(let p=0;p<n;p++)for(let k=0;k<s.per;k++)owner[pool[p*s.per+k]]=p;
-  H={phase:"draw",settings:{...s},players,owner,N,work,tiles:{},drawDone:new Set(),guesses:{},need:{},left:new Set(),
-     startedAt:Date.now()};
+  const gameId=Math.random().toString(36).slice(2,10);
+  H={gameId,phase:"draw",settings:{...s},players,owner,assigned:owner.slice(),N,work,tiles:{},drawDone:new Set(),guesses:{},need:{},left:new Set(),board:null};
   // Deadline covers every tile's timer plus slack for slow devices and the intro screen
-  H.timer=setTimeout(hostFinishDraw,(s.per*s.seconds+25)*1000);
-  players.forEach((p,pi)=>sendTo(p.id,{t:"start",settings:H.settings,players,me:pi,myCells:owner.map((o,i)=>o===pi?i:-1).filter(i=>i>=0)}));
+  const drawMs=(s.per*s.seconds+25)*1000;
+  H.drawDeadline=Date.now()+drawMs;H.timer=setTimeout(hostFinishDraw,drawMs);
+  players.forEach((p,pi)=>sendTo(p.id,{t:"start",gameId,settings:H.settings,players,me:pi,myCells:owner.map((o,i)=>o===pi?i:-1).filter(i=>i>=0)}));
   hostProgress();
 }
 const present=()=>H.players.filter(p=>!H.left.has(p.id));
 function hostProgress(){
   if(!H)return;
   const done=H.phase==="draw"?[...H.drawDone]:H.players.filter((p,gi)=>H.guesses[gi]).map(p=>p.id);
-  broadcast({t:"progress",phase:H.phase,done,left:[...H.left]});
+  broadcast({t:"progress",gameId:H.gameId,phase:H.phase,done,left:[...H.left]});
 }
 function hostCheckDrawn(){if(H&&H.phase==="draw"&&present().every(p=>H.drawDone.has(p.id)))hostFinishDraw()}
 function hostFinishDraw(){
   if(!H||H.phase!=="draw")return;clearTimeout(H.timer);
   // A tile nobody delivered falls back to the original and stops counting as hand-drawn
   H.owner=H.owner.map((o,i)=>o>=0&&H.tiles[i]?o:-1);
-  const board=H.owner.map((o,i)=>o>=0?H.tiles[i]:cropURL(H.work,H.N,i));
+  H.board=H.owner.map((o,i)=>o>=0?H.tiles[i]:cropURL(H.work,H.N,i));
   const drawn=H.owner.filter(o=>o>=0).length;
   H.phase="guess";
   H.players.forEach((p,gi)=>{H.need[gi]=drawn-H.owner.filter(o=>o===gi).length});
-  present().forEach(p=>{const gi=H.players.indexOf(p);sendTo(p.id,{t:"board",tiles:board,need:H.need[gi]})});
+  present().forEach(p=>{const gi=H.players.indexOf(p);sendTo(p.id,{t:"board",gameId:H.gameId,tiles:H.board,need:H.need[gi]})});
   hostProgress();
-  H.timer=setTimeout(hostFinish,(REVEAL_SECONDS+GUESS_SECONDS+15)*1000);
+  const guessMs=(REVEAL_SECONDS+GUESS_SECONDS+15)*1000;
+  H.guessDeadline=Date.now()+guessMs;H.timer=setTimeout(hostFinish,guessMs);
 }
 function hostCheckGuessed(){if(H&&H.phase==="guess"&&present().every(p=>H.guesses[H.players.indexOf(p)]))hostFinish()}
 function hostFinish(){
   if(!H||H.phase!=="guess")return;clearTimeout(H.timer);H.phase="result";
   present().forEach(p=>{const gi=H.players.indexOf(p);if(!H.guesses[gi])H.guesses[gi]=[]});
-  broadcast({t:"result",owner:H.owner,guesses:H.guesses,left:[...H.left]});
+  broadcast({t:"result",gameId:H.gameId,owner:H.owner,guesses:H.guesses,left:[...H.left]});
 }
 function hostBackToLobby(){if(H&&H.timer)clearTimeout(H.timer);H=null;broadcast({t:"toLobby"});hostLobbyChanged()}
+// Everything a returning player needs to pick up where the game is now
+function hostResume(pid){
+  const gi=H.players.findIndex(p=>p.id===pid);
+  const myCells=H.assigned.map((o,i)=>o===gi?i:-1).filter(i=>i>=0);
+  const base={t:"resume",gameId:H.gameId,phase:H.phase,settings:H.settings,players:H.players,me:gi,myCells};
+  if(H.phase==="draw")return{...base,doneCells:myCells.filter(c=>H.tiles[c]),finished:H.drawDone.has(pid),msLeft:H.drawDeadline-Date.now()};
+  if(H.phase==="guess")return{...base,tiles:H.board,need:H.need[gi]|0,guessed:!!H.guesses[gi],msLeft:H.guessDeadline-Date.now()};
+  return{...base,tiles:H.board,need:H.need[gi]|0,owner:H.owner,guesses:H.guesses,left:[...H.left]};
+}
 
-/* ---------- Guest: joining ---------- */
+/* ---------- Guest: joining and reconnecting ---------- */
 function joinRoom(code){
   renderConnecting(`部屋 ${code} を探しています…`);
-  const peer=new Peer(undefined,PEER_OPTS);
-  let opened=false;
-  const fail=m=>{if(net&&net.peer!==peer)return;try{peer.destroy()}catch(e){}net=null;renderHome(m)};
-  const giveUp=setTimeout(()=>{if(!opened)fail(`部屋 ${code} につながりませんでした。コードを確認するか、ホストの通信環境によってはつながらないことがあります。`)},15000);
-  peer.on("open",id=>{
-    me.id=id;
-    const conn=peer.connect(ROOM_PREFIX+code,{reliable:true});
-    net={peer,isHost:false,code,host:conn};
-    conn.on("open",()=>{opened=true;clearTimeout(giveUp);conn.send({t:"hello",name:me.name});lastSeen.set("host",Date.now());startHeartbeat();
-      history.replaceState(null,"",location.pathname+location.search+"#"+code)});
-    conn.on("data",guestRecv);
-    conn.on("close",()=>{if(net&&net.host===conn)lostHost()});
+  me.seat=seatFor(code);
+  net={peer:null,isHost:false,code,host:null,joined:false,outbox:[],giveUp:null};
+  const n=net;
+  n.giveUp=setTimeout(()=>{if(net===n&&!n.joined)failJoin(`部屋 ${code} につながりませんでした。コードを確認するか、ホストの通信環境によってはつながらないことがあります。`)},15000);
+  openGuestPeer(m=>{clearTimeout(n.giveUp);failJoin(m)});
+}
+function failJoin(m){const n=net;net=null;if(n&&n.peer)try{n.peer.destroy()}catch(e){}renderHome(m)}
+function openGuestPeer(onFatal){
+  const n=net;if(!n)return;
+  if(n.peer)try{n.peer.destroy()}catch(e){}
+  const peer=new Peer(undefined,PEER_OPTS);n.peer=peer;
+  peer.on("open",()=>{
+    if(net!==n||n.peer!==peer)return;
+    const conn=peer.connect(ROOM_PREFIX+n.code,{reliable:true});n.host=conn;
+    conn.on("open",()=>{if(net!==n||n.host!==conn)return;lastSeen.set("host",Date.now());conn.send({t:"hello",name:me.name,seat:me.seat})});
+    conn.on("data",d=>{if(net===n&&n.host===conn)guestRecv(d)});
+    const lost=()=>{if(net===n&&n.host===conn&&n.joined)startReconnect()};
+    conn.on("close",lost);conn.on("error",lost);
   });
   peer.on("disconnected",()=>{try{peer.reconnect()}catch(e){}});
   peer.on("error",err=>{
-    if(err.type==="peer-unavailable"){clearTimeout(giveUp);fail(`部屋 ${code} が見つかりません。コードを確認してください。`);return}
-    if(!opened){clearTimeout(giveUp);fail(netErrorText(err))}
+    if(net!==n||n.peer!==peer||n.joined)return; // while reconnecting, an error just means "try again"
+    onFatal(err.type==="peer-unavailable"?`部屋 ${n.code} が見つかりません。コードを確認してください。`:netErrorText(err));
   });
 }
-function lostHost(){
+function startReconnect(){
+  if(!net||net.isHost||rc.active)return;
+  rc.active=true;rc.since=Date.now();
+  attemptReconnect();
+}
+function attemptReconnect(){
+  if(!net||!rc.active)return;
+  const left=RECONNECT_FOR-(Date.now()-rc.since);
+  if(left<=0){lostHost(true);return}
+  showBanner(`通信が途切れました。再接続しています…(あと${Math.ceil(left/1000)}秒)`);
+  openGuestPeer(()=>{});
+  clearTimeout(rc.timer);rc.timer=setTimeout(attemptReconnect,7000);
+}
+function lostHost(timedOut){
   if(screen==="lost")return;
-  clearInterval(timerId);clearInterval(beatId);try{net.peer.destroy()}catch(e){}net=null;G=null;
-  screen="lost";
+  const code=net&&net.code;
+  clearInterval(timerId);clearInterval(beatId);clearTimeout(rc.timer);rc.active=false;hideBanner();
+  if(net&&net.peer)try{net.peer.destroy()}catch(e){}
+  net=null;G=null;screen="lost";
   h(`<section class="pass"><span class="eyebrow">接続が切れました</span><h2>ホストとの接続が切れました</h2>
-    <p class="ban">ホストがページを閉じたか、通信が途切れたようです。</p><button class="primary" id="home">最初の画面に戻る</button></section>`);
+    <p class="ban">${timedOut?"60秒待ってもホストにつながりませんでした。ホストの通信が戻っていれば、もう一度つなぐとゲームの続きに戻れます。":"ホストが部屋を閉じました。"}</p>
+    <div class="row" style="justify-content:center">${timedOut&&code?`<button class="primary" id="retry">もう一度つなぐ</button>`:""}<button id="home">最初の画面に戻る</button></div></section>`);
+  const r=document.getElementById("retry");if(r)r.onclick=()=>joinRoom(code);
   document.getElementById("home").onclick=()=>{history.replaceState(null,"",location.pathname+location.search);renderHome()};
 }
 
 /* ---------- Every player: messages ---------- */
+function buildGame(d){
+  const s=cleanSettings(d.settings),work=workOf(s.work),N=s.grid;
+  G={gameId:String(d.gameId||""),work,N,cw:work.w/N,ch:work.h/N,per:s.per,seconds:s.seconds,guide:!!s.guide,peek:!!s.peek,
+     players:(d.players||[]).map(p=>({id:String(p.id),name:String(p.name).slice(0,10)})),me:d.me|0,
+     myCells:(d.myCells||[]).map(x=>x|0).filter(x=>x>=0&&x<N*N),done:[],left:[],board:null,todo:null};
+}
+const validTiles=t=>Array.isArray(t)&&G&&t.length===G.N*G.N&&t.every(isPng);
+function applyResult(d){
+  const np=G.players.length;
+  G.owner=[...Array(G.N*G.N)].map((_,i)=>{const o=(d.owner||[])[i]|0;return o>=0&&o<np?o:-1});
+  G.guesses={};Object.keys(d.guesses||{}).forEach(k=>{const gi=k|0;if(gi>=0&&gi<np&&Array.isArray(d.guesses[k]))G.guesses[gi]=d.guesses[k].map(x=>x|0)});
+  G.left=d.left||[];clearInterval(timerId);renderResult();
+}
 function guestRecv(d){
   if(!d||typeof d!=="object")return;
   if(net&&!net.isHost)lastSeen.set("host",Date.now());
   if(d.t==="ping")return;
-  if(d.t==="refused"){const r=String(d.reason||"参加できませんでした。");try{net.peer.destroy()}catch(e){}net=null;renderHome(r);return}
+  if(d.t==="welcome"){
+    const first=!net.joined;net.joined=true;me.pid=String(d.pid);clearTimeout(net.giveUp);
+    if(rc.active){rc.active=false;clearTimeout(rc.timer);hideBanner();toast("再接続しました")}
+    if(first){startHeartbeat();history.replaceState(null,"",location.pathname+location.search+"#"+net.code)}
+    const out=net.outbox.splice(0);out.forEach(m=>{try{net.host.send(m)}catch(e){net.outbox.push(m)}});
+    return}
+  if(d.t==="closed"){lostHost(false);return}
+  if(d.t==="refused"){const r=String(d.reason||"参加できませんでした。");clearTimeout(rc.timer);rc.active=false;hideBanner();
+    if(net){clearTimeout(net.giveUp);try{net.peer.destroy()}catch(e){}}net=null;G=null;renderHome(r);return}
+  if(d.t==="status"){L.status=d.status||{};L.route=d.route||{};
+    if(screen==="lobby")renderLobby();else if(screen==="wait")renderWait();return}
   if(d.t==="lobby"){
     L.players=(d.players||[]).slice(0,MAX_PLAYERS).map(p=>({id:String(p.id),name:String(p.name).slice(0,10)}));
-    L.settings=cleanSettings(d.settings);
+    L.settings=cleanSettings(d.settings);L.status=d.status||L.status;L.route=d.route||L.route;
     if(!G)renderLobby();return}
   if(d.t==="toLobby"){clearInterval(timerId);G=null;renderLobby();return}
-  if(d.t==="start"){
-    const s=cleanSettings(d.settings),work=workOf(s.work),N=s.grid;
-    G={work,N,cw:work.w/N,ch:work.h/N,per:s.per,seconds:s.seconds,guide:!!s.guide,peek:!!s.peek,
-       players:d.players.map(p=>({id:String(p.id),name:String(p.name).slice(0,10)})),me:d.me|0,
-       myCells:(d.myCells||[]).map(x=>x|0).filter(x=>x>=0&&x<N*N),done:[],left:[],board:null};
-    renderIntro();return}
-  if(!G)return;
+  if(d.t==="start"){buildGame(d);renderIntro();return}
+  if(d.t==="resume"){resumeGame(d);return}
+  if(!G||(d.gameId&&G.gameId&&d.gameId!==G.gameId))return;
   if(d.t==="progress"){G.done=d.done||[];G.left=d.left||[];G.phase=d.phase;
     if(screen==="wait")renderWait();return}
   if(d.t==="board"){
-    if(!Array.isArray(d.tiles)||d.tiles.length!==G.N*G.N||!d.tiles.every(isPng))return;
+    if(!validTiles(d.tiles))return;
     clearInterval(timerId);G.board=d.tiles;G.need=d.need|0;renderReveal();return}
-  if(d.t==="result"){const np=G.players.length;
-    G.owner=[...Array(G.N*G.N)].map((_,i)=>{const o=(d.owner||[])[i]|0;return o>=0&&o<np?o:-1});
-    G.guesses={};Object.keys(d.guesses||{}).forEach(k=>{const gi=k|0;if(gi>=0&&gi<np&&Array.isArray(d.guesses[k]))G.guesses[gi]=d.guesses[k].map(x=>x|0)});
-    G.left=d.left||[];renderResult();return}
+  if(d.t==="result"){applyResult(d);return}
+}
+// Pick the game back up after a reconnect or a reload
+function resumeGame(d){
+  const same=!!(G&&G.gameId===d.gameId);
+  if(!same)buildGame(d);
+  if(d.phase==="draw"){
+    if(same)return; // only a short blip: keep drawing, queued tiles were already resent
+    if(d.finished){G.phase="draw";screen="wait";renderWait();return}
+    const done=new Set((d.doneCells||[]).map(x=>x|0));
+    G.todo=G.myCells.filter(c=>!done.has(c));
+    if(!G.todo.length){screen="wait";renderWait();toHost({t:"drawDone"});return}
+    toast("ゲームに戻りました。続きから描けます");startDrawing();return;
+  }
+  if(d.phase==="guess"){
+    if(same&&G.board&&["reveal","guess","wait"].includes(screen))return;
+    if(!validTiles(d.tiles))return;
+    clearInterval(timerId);G.board=d.tiles;G.need=d.need|0;
+    if(d.guessed){G.phase="guess";screen="wait";renderWait();return}
+    G.guessMs=Math.max(5000,Math.min(GUESS_SECONDS*1000,(+d.msLeft||0)-3000));
+    toast("ゲームに戻りました。推理の途中です");renderGuess();return;
+  }
+  if(d.phase==="result"){
+    if(same&&screen==="result")return;
+    if(!validTiles(d.tiles))return;
+    G.board=d.tiles;G.need=d.need|0;applyResult(d);
+  }
 }
 
 /* ---------- Lobby ---------- */
@@ -742,7 +937,8 @@ function renderLobby(){
         </div>
         <div class="invite"><input id="link" value="${esc(link)}" readonly aria-label="招待リンク"><button id="copy">招待リンクをコピー</button></div>
         <div class="field"><span class="label">参加者 ${n} / ${MAX_PLAYERS}人</span>
-          <div class="roster">${L.players.map((p,i)=>`<div class="member">${dot(i)}<span class="nm">${esc(p.name)}</span>${i===0?"<small>ホスト</small>":p.id===me.id?"<small>あなた</small>":""}</div>`).join("")}</div>
+          <div class="roster">${L.players.map((p,i)=>`<div class="member">${dot(i)}<span class="nm">${esc(p.name)}</span>${statusChip(p.id)}${p.id===HOST_PID?"<small>ホスト</small>":`${routeChip(p.id)}${p.id===me.pid?"<small>あなた</small>":""}`}</div>`).join("")}</div>
+          ${L.players.length>1?`<p class="hint">「直接」はホストと直接つながっています。「中継」は中継サーバーを経由していて、通信が途切れやすいことがあります。</p>`:""}
         </div>
       </div>
       ${host?`
@@ -816,7 +1012,7 @@ function renderIntro(){
   timerId=setInterval(()=>{left--;const e=document.getElementById("cd");if(e)e.textContent=left;if(left<=0)go()},1000);
 }
 function startDrawing(){
-  const cells=shuffle(G.myCells.slice());let idx=0;G.guideShown=true;
+  const cells=shuffle((G.todo||G.myCells).slice());let idx=0;G.guideShown=true;G.todo=null;
   const next=()=>{if(G.board)return;
     if(idx<cells.length)drawCell(cells[idx],idx,cells.length,png=>{toHost({t:"tile",cell:cells[idx],png});idx++;next()});
     // Show the waiting screen first: when the host is the last to finish, the next screen arrives synchronously
@@ -977,7 +1173,7 @@ function renderWait(){
     <span class="eyebrow">${draw?"修復作業中":"推理中"}</span>
     <h2>${draw?"ほかの修復士の作業を待っています":"ほかの人の推理を待っています"}</h2>
     <p class="ban">${active.filter(p=>done.has(p.id)).length} / ${active.length}人が${draw?"描き終えました":"推理を確定しました"}</p>
-    <div class="roster" style="width:100%;max-width:640px">${G.players.map((p,i)=>`<div class="member ${done.has(p.id)?"done":""}">${dot(i)}<span class="nm">${esc(p.name)}</span><small>${left.has(p.id)?"退出":done.has(p.id)?"完了":"作業中"}</small></div>`).join("")}</div>
+    <div class="roster" style="width:100%;max-width:640px">${G.players.map((p,i)=>`<div class="member ${done.has(p.id)?"done":""}">${dot(i)}<span class="nm">${esc(p.name)}</span><small>${left.has(p.id)?"退出":L.status[p.id]==="away"?"再接続待ち":L.status[p.id]==="unstable"?"通信が不安定":done.has(p.id)?"完了":"作業中"}</small></div>`).join("")}</div>
   </section>`);
 }
 
@@ -1059,7 +1255,7 @@ function renderReveal(){
 /* ---------- Guess ---------- */
 function renderGuess(){
   screen="guess";
-  const need=G.need,picked=new Set(),mine=new Set(G.myCells),total=GUESS_SECONDS*1000;
+  const need=G.need,picked=new Set(),mine=new Set(G.myCells),total=G.guessMs||GUESS_SECONDS*1000;G.guessMs=0;
   let left=total,sent=false;
   // Submits whatever is picked; on time-out that may be fewer than asked for
   const submit=()=>{if(sent)return;sent=true;stop();G.phase="guess";screen="wait";renderWait();toHost({t:"guess",cells:[...picked]})};
@@ -1144,7 +1340,7 @@ function renderResult(showOriginal=false){
   document.getElementById("leave").onclick=leaveRoom;
 }
 
-window.addEventListener("beforeunload",()=>{if(net&&net.peer)try{net.peer.destroy()}catch(e){}});
+window.addEventListener("beforeunload",()=>{if(!net)return;if(net.isHost)net.conns.forEach(c=>{try{c.send({t:"closed"})}catch(e){}});try{net.peer.destroy()}catch(e){}});
 loadImages().then(()=>{
   if(typeof Peer==="undefined"){renderHome("通信ライブラリを読み込めませんでした。ネットワークを確認してページを再読み込みしてください。");return}
   renderHome();
