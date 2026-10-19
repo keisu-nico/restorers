@@ -871,9 +871,7 @@ function drawCell(cell,k,total,done){
     <span class="spacer"></span>
     ${G.guide?`<button class="tool" id="guideBtn" aria-pressed="${G.guideShown}">補助線</button>`:""}
     <button class="tool" id="bucket" aria-pressed="false">バケツ</button>
-    <button class="tool" id="eraser" aria-pressed="false">消しゴム</button>
     <button id="undo">元に戻す</button>
-    <button id="fill">全面を塗る</button>
     <div class="otherbox" id="otherbox" hidden>
       <span class="label">ほかの色(このマスにはほとんど出てこない色)</span>
       ${colorFamilies(others).map(f=>`<div class="famrow"><span class="famname">${f.name}</span><div class="swatches">${f.colors.map(swatch).join("")}</div></div>`).join("")}
@@ -890,7 +888,7 @@ function drawCell(cell,k,total,done){
   const pad=document.getElementById("pad"),ctx=pad.getContext("2d",{willReadFrequently:true});
   ctx.imageSmoothingEnabled=false;ctx.fillStyle=PAPER;ctx.fillRect(0,0,cw,ch);
   let color=local[0],size=sizes[1],erasing=false;const undo=[];
-  const swBtns=[...document.querySelectorAll(".sw")],eraserBtn=document.getElementById("eraser");
+  const swBtns=[...document.querySelectorAll(".sw")];
   const guideBtn=document.getElementById("guideBtn");
   if(guideBtn)guideBtn.onclick=()=>{G.guideShown=!G.guideShown;guideBtn.setAttribute("aria-pressed",String(G.guideShown));
     document.querySelectorAll(".guide").forEach(g=>g.hidden=!G.guideShown)};
@@ -898,14 +896,13 @@ function drawCell(cell,k,total,done){
   const showOthers=open=>{if(!moreBtn)return;otherBox.hidden=!open;moreBtn.setAttribute("aria-expanded",String(open));
     moreBtn.textContent=open?"ほかの色を閉じる":`ほかの色 +${others.length}`};
   if(moreBtn)moreBtn.onclick=()=>showOthers(otherBox.hidden);
-  const setColor=col=>{color=col;erasing=false;eraserBtn.setAttribute("aria-pressed","false");
+  const setColor=col=>{color=col;erasing=false;
     swBtns.forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.c===col)));
     if(others.includes(col))showOthers(true)};
   setColor(color);
   swBtns.forEach(b=>b.onclick=()=>setColor(b.dataset.c));
   document.querySelectorAll("#sizes button").forEach(b=>b.onclick=()=>{size=+b.dataset.s;document.querySelectorAll("#sizes button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)))});
-  eraserBtn.onclick=()=>{erasing=!erasing;eraserBtn.setAttribute("aria-pressed",String(erasing))};
-  // Bucket: fills the connected area of the tapped color. With the eraser on, it clears that area instead
+  // Bucket: fills the connected area of the tapped color with the current paint
   let bucketOn=false;const bucketBtn=document.getElementById("bucket");
   bucketBtn.onclick=()=>{bucketOn=!bucketOn;bucketBtn.setAttribute("aria-pressed",String(bucketOn))};
   const bucketFill=(fx,fy)=>{
@@ -934,7 +931,6 @@ function drawCell(cell,k,total,done){
   const pushUndo=()=>{const c2=document.createElement("canvas");c2.width=cw;c2.height=ch;c2.getContext("2d").drawImage(pad,0,0);
     undo.push(c2);if(undo.length>40)undo.shift()};
   document.getElementById("undo").onclick=()=>{const c2=undo.pop();if(c2){ctx.clearRect(0,0,cw,ch);ctx.drawImage(c2,0,0)}};
-  document.getElementById("fill").onclick=()=>{pushUndo();ctx.fillStyle=erasing?PAPER:color;ctx.fillRect(0,0,cw,ch)};
   ref.addEventListener("pointerdown",e=>{
     const b=ref.getBoundingClientRect();
     const x=Math.max(0,Math.min(cw-1,Math.floor((e.clientX-b.left)/b.width*cw))),y=Math.max(0,Math.min(ch-1,Math.floor((e.clientY-b.top)/b.height*ch)));
