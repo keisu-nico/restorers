@@ -147,6 +147,18 @@ tr.rise{animation:rise .6s cubic-bezier(.2,.8,.2,1) both}
 @keyframes crown{from{opacity:0;transform:scale(0) rotate(-25deg)}to{opacity:1;transform:none}}
 td.rank{font-family:var(--display);font-weight:800;white-space:nowrap;text-align:left}
 @media (prefers-reduced-motion:reduce){tr.rise,.rise .crown{animation:none}}
+/* Result view toggles */
+.hide-lines .cell{outline:none}
+.hide-names .cell .tag,.hide-names .cell .mark{display:none}
+.hide-coords .cell .coord{display:none}
+.viewbar .toggle{font-size:13px;padding:7px 12px}
+/* Countdown message */
+.toast{position:fixed;left:50%;top:calc(18px + env(safe-area-inset-top,0px));z-index:50;transform:translateX(-50%);
+  background:var(--alarm);color:#1c1611;font-weight:700;font-size:18px;letter-spacing:.06em;padding:10px 22px;border-radius:99px;
+  box-shadow:0 10px 30px rgba(0,0,0,.5);animation:toast 2.2s ease both;pointer-events:none}
+@keyframes toast{0%{opacity:0;transform:translate(-50%,-12px)}12%{opacity:1;transform:translate(-50%,0)}80%{opacity:1}100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.toast{animation:none}}
+.snd{font-size:13px;padding:8px 12px}
 .hint{font-size:12px;color:var(--muted)}
 
 /* Composite */
@@ -834,6 +846,7 @@ function drawCell(cell,k,total,done){
   <div class="drawhead">
     <span class="label">${dot(G.me,9)} ${esc(G.players[G.me].name)} · ${k+1} / ${total}マス目</span>
     ${G.seconds?`<div class="timer" id="timer"><div class="bar"><i id="barfill"></i></div><output id="tleft">${G.seconds}</output></div>`:`<div class="timer"><span class="label">制限時間なし</span></div>`}
+    ${sndButton()}
     <button class="primary" id="done">${k+1<total?"このマスを完成":"描き終える"}</button>
   </div>
   <section class="stage">
@@ -950,12 +963,12 @@ function drawCell(cell,k,total,done){
   pad.addEventListener("pointerup",end);pad.addEventListener("pointercancel",end);
 
   const t0=performance.now(),limit=G.seconds*1000,fillEl=document.getElementById("barfill"),out=document.getElementById("tleft"),tbox=document.getElementById("timer");
-  let finished=false;
+  let finished=false;const fx=timerFx();
   const finish=()=>{if(finished)return;finished=true;clearInterval(timerId);drawing=false;done(pad.toDataURL("image/png"))};
   clearInterval(timerId);
   if(limit)timerId=setInterval(()=>{const left=Math.max(0,limit-(performance.now()-t0));
     out.textContent=Math.ceil(left/1000);fillEl.style.width=(left/limit*100)+"%";
-    tbox.classList.toggle("hurry",left<=10000);if(left<=0)finish()},200);
+    tbox.classList.toggle("hurry",left<=10000);fx(left);if(left<=0)finish()},200);
   document.getElementById("done").onclick=finish;
 }
 
@@ -970,6 +983,46 @@ function renderWait(){
     <p class="ban">${active.filter(p=>done.has(p.id)).length} / ${active.length}人が${draw?"描き終えました":"推理を確定しました"}</p>
     <div class="roster" style="width:100%;max-width:640px">${G.players.map((p,i)=>`<div class="member ${done.has(p.id)?"done":""}">${dot(i)}<span class="nm">${esc(p.name)}</span><small>${left.has(p.id)?"退出":done.has(p.id)?"完了":"作業中"}</small></div>`).join("")}</div>
   </section>`);
+}
+
+/* ---------- Sound & countdown alerts ---------- */
+// Sounds are synthesized with Web Audio, so nothing extra is downloaded. Browsers only allow audio
+// after the player has touched the page, so the audio context is opened on the first tap or key press.
+const sfx=(()=>{
+  let ctx=null,muted=false;
+  try{muted=localStorage.getItem("shufukushi-mute")==="1"}catch(e){}
+  const open=()=>{try{if(!ctx){const C=window.AudioContext||window.webkitAudioContext;if(!C)return null;ctx=new C()}
+    if(ctx.state==="suspended")ctx.resume();}catch(e){ctx=null}return ctx};
+  addEventListener("pointerdown",open,{capture:true});addEventListener("keydown",open,{capture:true});
+  const tone=(freq,at,dur,peak,type="sine")=>{const c=ctx,o=c.createOscillator(),g=c.createGain();
+    o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(0.0001,at);g.gain.exponentialRampToValueAtTime(peak,at+0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001,at+dur);o.connect(g).connect(c.destination);o.start(at);o.stop(at+dur+0.02)};
+  const ready=()=>!muted&&open()&&ctx.state==="running";
+  return{
+    // A small bell (suzu): two quick strikes, each a bright fundamental with inharmonic overtones
+    bell(){if(!ready())return;const t=ctx.currentTime;
+      [0,0.13].forEach((d,i)=>{const f=i?1975:1760;tone(f,t+d,1.4,0.22);tone(f*2.76,t+d,0.7,0.07);tone(f*5.4,t+d,0.35,0.035)})},
+    // A clock tick: a very short click, alternating pitch for tick and tock
+    tick(alt){if(!ready())return;const t=ctx.currentTime;tone(alt?1250:1650,t,0.045,0.18,"square");tone(alt?2500:3300,t,0.02,0.06,"triangle")},
+    get muted(){return muted},
+    toggle(){muted=!muted;try{localStorage.setItem("shufukushi-mute",muted?"1":"0")}catch(e){}
+      document.querySelectorAll(".snd").forEach(b=>{b.setAttribute("aria-pressed",String(!muted));b.textContent=muted?"音 オフ":"音 オン"})},
+  };
+})();
+addEventListener("click",e=>{if(e.target.closest&&e.target.closest(".snd"))sfx.toggle()});
+const sndButton=()=>`<button class="tool snd" aria-pressed="${!sfx.muted}" title="カウントダウンの音">${sfx.muted?"音 オフ":"音 オン"}</button>`;
+function toast(text){
+  const t=document.createElement("div");t.className="toast";t.setAttribute("role","status");t.textContent=text;
+  document.body.appendChild(t);setTimeout(()=>t.remove(),2200);
+}
+// Feed it the milliseconds left on any timer: a bell and message at 15s, then a tick every second from 10s
+function timerFx(){
+  let warned=false,last=null;
+  return left=>{
+    if(!warned&&left<=15000&&left>10000){warned=true;sfx.bell();toast("残り15秒")}
+    const s=Math.ceil(left/1000);
+    if(left>0&&left<=10000&&s!==last){last=s;sfx.tick(s%2)}
+  };
 }
 
 /* ---------- Phase timers ---------- */
@@ -1017,7 +1070,7 @@ function renderGuess(){
   const paint=()=>{
     h(`<div class="drawhead"><div style="display:flex;flex-direction:column;gap:4px">
         <span class="eyebrow">推理 · ${esc(G.players[G.me].name)} さん</span>
-        <h2>手描きのマスはどれ?</h2></div>${timerHTML(left,total)}</div>
+        <h2>手描きのマスはどれ?</h2></div>${timerHTML(left,total)}${sndButton()}</div>
       <section class="two">
         <div class="boardwrap">${boardHTML(G.board,{clickable:true,locked:i=>mine.has(i),picked:i=>picked.has(i),
           tag:i=>mine.has(i)?`<span class="tag" style="background:${PLAYER_COLORS[G.me]}">自分</span>`
@@ -1034,10 +1087,21 @@ function renderGuess(){
     document.getElementById("ok").onclick=submit;
   };
   paint();
-  const stop=countdown(total,l=>{left=l;paintTimer(l,total)},submit);
+  const fx=timerFx();
+  const stop=countdown(total,l=>{left=l;paintTimer(l,total);fx(l)},submit);
 }
 
 /* ---------- Result ---------- */
+// Result board view toggles: grid lines, names and judgements, tile labels
+const VIEW_ITEMS=[["lines","マスの線"],["names","名前と判定"],["coords","マス名"]];
+const viewClass=()=>VIEW_ITEMS.filter(([k])=>!G.view[k]).map(([k])=>"hide-"+k).join(" ");
+const viewBar=()=>`<div class="seg viewbar">${VIEW_ITEMS.map(([k,label])=>`<button class="toggle" data-view="${k}" aria-pressed="${G.view[k]}"><span class="sw-state">${G.view[k]?"オン":"オフ"}</span>${label}</button>`).join("")}</div>`;
+function bindViewBar(){
+  document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{const k=b.dataset.view;G.view[k]=!G.view[k];
+    b.setAttribute("aria-pressed",String(G.view[k]));b.querySelector(".sw-state").textContent=G.view[k]?"オン":"オフ";
+    document.getElementById("resultBoard").className="boardwrap "+viewClass()});
+}
+
 function score(){
   const owner=G.owner,guess=gi=>new Set(G.guesses[gi]||[]),voters=G.players.map((_,gi)=>gi).filter(gi=>G.guesses[gi]);
   return G.players.map((p,gi)=>{
@@ -1048,6 +1112,7 @@ function score(){
   }).filter(Boolean);
 }
 function renderResult(showOriginal=false){
+  if(!G.view)G.view={lines:true,names:true,coords:true};
   // Rows animate in only the first time the result is shown, not when toggling the original
   const animate=!G.resultShown;G.resultShown=true;
   screen="result";
@@ -1060,10 +1125,10 @@ function renderResult(showOriginal=false){
   h(`<div style="display:flex;flex-direction:column;gap:4px"><span class="eyebrow">答え合わせ</span><h2>結果発表</h2></div>
   <section class="two">
     <div style="display:flex;flex-direction:column;gap:10px">
-      <div class="boardwrap">${boardHTML(tiles,{
+      <div class="boardwrap ${viewClass()}" id="resultBoard">${boardHTML(tiles,{
         tag:i=>{const o=G.owner[i];return o>=0?`<span class="tag" style="background:${PLAYER_COLORS[o]}">${esc(G.players[o].name)}</span>`:""},
         mark:i=>{const o=G.owner[i],v=votes(i);return o>=0?`<span class="mark">見破り ${v}/${others(i)}</span>`:v?`<span class="mark">誤選択 ${v}</span>`:""}})}</div>
-      <button id="cmp">${showOriginal?"合作に戻す":"原画と見比べる"}</button>
+      <div class="row" style="gap:8px"><button id="cmp">${showOriginal?"合作に戻す":"原画と見比べる"}</button>${viewBar()}</div>
     </div>
     <div style="display:flex;flex-direction:column;gap:16px">
       <div class="tablewrap"><table>
@@ -1078,7 +1143,7 @@ function renderResult(showOriginal=false){
       </div>
     </div>
   </section>`);
-  document.getElementById("cmp").onclick=()=>renderResult(!showOriginal);
+  document.getElementById("cmp").onclick=()=>renderResult(!showOriginal);bindViewBar();
   if(host)document.getElementById("again").onclick=hostBackToLobby;
   document.getElementById("leave").onclick=leaveRoom;
 }
