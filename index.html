@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>ツギハギ名画</title>
+<title>最速!!名画修復</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap">
 <style>
@@ -465,7 +465,7 @@ function renderHome(msg=""){
   h(`
   <header style="display:flex;flex-direction:column;gap:6px">
     <span class="eyebrow">オンライン版 · 2〜8人</span>
-    <h1 class="gametitle">ツギハギ名画<span class="subtitle">名画修復完了?</span></h1>
+    <h1 class="gametitle">最速!!名画修復<span class="subtitle">名画修復完了?</span></h1>
     <p class="muted" style="max-width:40em">名画のマスを全員で同時に修復し、修復されたマスを探し当てるゲームです。部屋を作った人のブラウザがホストになります。</p>
   </header>
   <div class="panel" style="max-width:420px">
@@ -515,7 +515,7 @@ function renderPracticeSetup(){
   <header class="row" style="align-items:flex-end">
     <div style="display:flex;flex-direction:column;gap:6px">
       <span class="eyebrow">一人で練習</span>
-      <h1 class="gametitle">ツギハギ名画<span class="subtitle">名画修復完了?</span></h1>
+      <h1 class="gametitle">最速!!名画修復<span class="subtitle">名画修復完了?</span></h1>
     </div>
     <span class="spacer"></span>
     <button id="back">最初の画面に戻る</button>
@@ -997,7 +997,7 @@ function renderLobby(){
   <header class="row" style="align-items:flex-end">
     <div style="display:flex;flex-direction:column;gap:6px">
       <span class="eyebrow">${host?"あなたがホストです":"ロビー"}</span>
-      <h1 class="gametitle">ツギハギ名画<span class="subtitle">名画修復完了?</span></h1>
+      <h1 class="gametitle">最速!!名画修復<span class="subtitle">名画修復完了?</span></h1>
     </div>
     <span class="spacer"></span>
     <button id="leave">部屋を出る</button>
@@ -1371,15 +1371,15 @@ function renderGuess(){
 /* ---------- Result image (save / share / post) ---------- */
 // One card: the finished painting in its gilt frame with the ranking beside it (portrait paintings)
 // or under it (landscape paintings). Grid lines, names and tile labels follow the result view toggles.
-const GAME_TITLE="ツギハギ名画",GAME_SUB="名画修復完了?";
+const GAME_TITLE="最速!!名画修復",GAME_SUB="名画修復完了?",HASHTAG="最速名画修復";
 const CARD={bg:"#1c1611",panel:"#30261d",line:"#4a3b2c",ink:"#f0e6d2",muted:"#b4a486",gilt:"#cfa65b",
   disp:'"Shippori Mincho B1","Hiragino Mincho ProN","Yu Mincho",serif',body:'"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif'};
 const loadImg=src=>new Promise(res=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>res(null);im.src=src});
 function rankRows(rows){return rows.slice().sort((a,b)=>b.total-a.total).map(r=>({...r,rank:1+rows.filter(x=>x.total>r.total).length}))}
 function shareText(d){
-  if(d.practice)return `『${d.work.title}』のマス${d.cellLabel}を修復しました。${d.showScore?`原画との一致度${d.score}%「${d.rankTitle}」`:""} #${GAME_TITLE}`;
+  if(d.practice)return `『${d.work.title}』のマス${d.cellLabel}を修復しました。${d.showScore?`原画との一致度${d.score}%「${d.rankTitle}」`:""} #${HASHTAG}`;
   const ranked=rankRows(d.rows),top=ranked.filter(r=>r.rank===1);
-  return `『${d.work.title}』を${d.names.length}人で修復しました。1位は${top.map(r=>r.name).join("・")}(${top[0]?top[0].total:0}点)! #${GAME_TITLE}`;
+  return `『${d.work.title}』を${d.names.length}人で修復しました。1位は${top.map(r=>r.name).join("・")}(${top[0]?top[0].total:0}点)! #${HASHTAG}`;
 }
 function rr(x,c,X,Y,W,H,R){c.beginPath();c.moveTo(X+R,Y);c.arcTo(X+W,Y,X+W,Y+H,R);c.arcTo(X+W,Y+H,X,Y+H,R);c.arcTo(X,Y+H,X,Y,R);c.arcTo(X,Y,X+W,Y,R);c.closePath()}
 async function buildResultCard(d){
@@ -1459,7 +1459,7 @@ async function buildResultCard(d){
   return new Promise(res=>c.toBlob(b=>res(b),"image/png"));
 }
 const cardName=d=>{const t=new Date(),z=n=>String(n).padStart(2,"0");
-  return `tsugihagi-${d.work.id}-${t.getFullYear()}${z(t.getMonth()+1)}${z(t.getDate())}-${z(t.getHours())}${z(t.getMinutes())}.png`};
+  return `saisoku-meiga-${d.work.id}-${t.getFullYear()}${z(t.getMonth()+1)}${z(t.getDate())}-${z(t.getHours())}${z(t.getMinutes())}.png`};
 
 // Online: save directly, share with the image on phones, post text + link to X
 function cardData(){
