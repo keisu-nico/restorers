@@ -45,6 +45,9 @@ input,select{font-family:var(--body);font-size:15px;background:var(--wall);color
 .pix{image-rendering:pixelated;image-rendering:crisp-edges}
 /* Credit */
 .credit{max-width:1000px;margin:40px auto 0;padding-top:16px;border-top:1px solid var(--line);display:flex;gap:6px 14px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--muted)}
+.thanks{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.thanks ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px}
+.thanks li{font-size:13px;color:var(--ink);padding:3px 10px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,.03)}
 .credit a{color:var(--gilt);text-decoration:none;border-bottom:1px solid transparent}
 .credit a:hover,.credit a:focus-visible{border-bottom-color:var(--gilt)}
 [hidden]{display:none!important}
@@ -459,6 +462,7 @@ function showBanner(text){let b=document.getElementById("netbanner");
 function hideBanner(){const b=document.getElementById("netbanner");if(b)b.remove()}
 
 /* ---------- Home ---------- */
+const TESTERS=["nikodora","furanka-","maruhoi1","list2","arisaka","cannon6130","Ronmel","savaive","Wilma"];
 function renderHome(msg=""){
   screen="home";
   const code=(location.hash.slice(1)||"").toUpperCase().replace(/[^A-Z]/g,"").slice(0,4);
@@ -492,7 +496,11 @@ function renderHome(msg=""){
       <p class="muted" style="font-size:13px">好きな絵とマスを選んで模写し、原画との一致度を採点します。通信はしません。</p></div>
     <button id="practice">練習する</button>
   </div>
-  <p class="err" id="err" role="alert">${esc(msg)}</p>`);
+  <p class="err" id="err" role="alert">${esc(msg)}</p>
+  <section class="thanks" aria-label="テストプレイ協力">
+    <span class="label">テストプレイに協力してくれた皆さん</span>
+    <ul>${TESTERS.map(n=>`<li>${esc(n)}</li>`).join("")}</ul>
+  </section>`);
   document.getElementById("practice").onclick=()=>{const n=document.getElementById("myname").value.trim().slice(0,10);if(n){me.name=n;store.set("shufukushi-name",n)}renderPracticeSetup()};
   const nameOk=()=>{me.name=document.getElementById("myname").value.trim().slice(0,10);
     if(!me.name){showErr("名前を入力してください。");document.getElementById("myname").focus();return false}
