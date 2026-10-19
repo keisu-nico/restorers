@@ -601,6 +601,10 @@ async function renderPracticeResult(cell,png,ms){
   const [,title,note]=RANKS.find(([min])=>score>=min);
   const tiles=[...Array(N*N)].map((_,i)=>i===cell?png:cropURL(w,N,i));
   const ar=`${w.w}/${w.h}`;
+  // View toggles and the "include score" choice are remembered across practice runs
+  G.view=P.view||(P.view={lines:true,names:true,coords:true});
+  G.showScore=P.showScore!==false;
+  G.practiceResult={cell,score,title,note,tiles,ms};
   h(`
   <div style="display:flex;flex-direction:column;gap:4px"><span class="eyebrow">練習結果 · ${esc(w.title)} ${cellName(cell,N)}</span><h2>${title}</h2></div>
   <section class="two">
@@ -610,7 +614,8 @@ async function renderPracticeResult(cell,png,ms){
         <figure><div class="frame" style="padding:6px;background:#3a2e22"><div class="inner"><img class="pix" src="${esc(png)}" alt="あなたの修復" style="aspect-ratio:${ar}"></div></div><figcaption>あなたの修復</figcaption></figure>
       </div>
       <span class="label">絵に戻すとこう見えます</span>
-      <div class="boardwrap">${boardHTML(tiles,{tag:i=>i===cell?`<span class="tag" style="background:var(--gilt)">あなた</span>`:""})}</div>
+      <div class="boardwrap ${viewClass()}" id="resultBoard">${boardHTML(tiles,{tag:i=>i===cell?`<span class="tag" style="background:var(--gilt)">あなた</span>`:""})}</div>
+      ${viewBar()}
     </div>
     <div style="display:flex;flex-direction:column;gap:16px">
       <div class="panel">
@@ -620,6 +625,12 @@ async function renderPracticeResult(cell,png,ms){
         <div class="facts"><span>かかった時間 ${Math.round(ms/1000)}秒</span><span>${isBest?(prev<0?"このマスの初記録":"自己ベスト更新"):`自己ベスト ${prev}%`}</span></div>
       </div>
       <p class="hint">一致度は、描いた色が原画の同じ場所(1ドットのずれまで許容)と合っている割合です。何も描かなければ0%になります。</p>
+      <div class="sharebox">
+        <span class="label">結果を残す</span>
+        <div class="seg"><button class="toggle" id="tscore" aria-pressed="${G.showScore}"><span class="sw-state">${G.showScore?"オン":"オフ"}</span>一致度を載せる</button></div>
+        ${shareBarHTML()}
+        <p class="hint">画像は、絵の下にある表示切り替え(マスの線・名前・マス名)の状態で作られます。一致度は画像とXの投稿文の両方に入ります。</p>
+      </div>
       <div class="row">
         <button class="primary" id="again">同じマスでもう一度</button>
         <button id="other">別のマスで練習</button>
@@ -630,6 +641,10 @@ async function renderPracticeResult(cell,png,ms){
   document.getElementById("again").onclick=()=>startPractice(cell);
   document.getElementById("other").onclick=()=>{P.cell=-1;startPractice()};
   document.getElementById("settings").onclick=renderPracticeSetup;
+  bindViewBar();bindShareBar();
+  const ts=document.getElementById("tscore");
+  ts.onclick=()=>{G.showScore=P.showScore=!G.showScore;ts.setAttribute("aria-pressed",String(G.showScore));
+    ts.querySelector(".sw-state").textContent=G.showScore?"オン":"オフ";refreshShare()};
 }
 const showErr=m=>{const e=document.getElementById("err");if(e)e.textContent=m};
 function renderConnecting(text){screen="connecting";h(`<section class="pass"><span class="eyebrow">接続中</span><p class="muted">${esc(text)}</p><button id="cancel">やめる</button></section>`);
@@ -1361,6 +1376,7 @@ const CARD={bg:"#1c1611",panel:"#30261d",line:"#4a3b2c",ink:"#f0e6d2",muted:"#b4
 const loadImg=src=>new Promise(res=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>res(null);im.src=src});
 function rankRows(rows){return rows.slice().sort((a,b)=>b.total-a.total).map(r=>({...r,rank:1+rows.filter(x=>x.total>r.total).length}))}
 function shareText(d){
+  if(d.practice)return `『${d.work.title}』のマス${d.cellLabel}を修復しました。${d.showScore?`原画との一致度${d.score}%「${d.rankTitle}」`:""} #${GAME_TITLE}`;
   const ranked=rankRows(d.rows),top=ranked.filter(r=>r.rank===1);
   return `『${d.work.title}』を${d.names.length}人で修復しました。1位は${top.map(r=>r.name).join("・")}(${top[0]?top[0].total:0}点)! #${GAME_TITLE}`;
 }
@@ -1370,9 +1386,9 @@ async function buildResultCard(d){
   try{await Promise.all([`800 40px ${CARD.disp}`,`700 24px ${CARD.body}`,`400 18px ${CARD.body}`].map(f=>document.fonts.load(f)))}catch(e){}
   const w=d.work,N=d.N,cw=w.w/N,ch=w.h/N;
   const imgs=await Promise.all(d.tiles.map(loadImg));
-  const ranked=rankRows(d.rows);
+  const ranked=d.practice?[]:rankRows(d.rows);
   const P=48,FR=16,HEAD=96,FOOT=72,side=w.w<=w.h,PANEL=460,ROW=58;
-  const listH=134+ranked.length*ROW;
+  const listH=d.practice?(d.showScore?330:140):134+ranked.length*ROW;
   const W=side?P+FR*2+w.w+40+PANEL+P:P+FR*2+w.w+P;
   const H=side?Math.max(P+HEAD+FR*2+w.h,P+HEAD+listH)+FOOT+P/2:P+HEAD+FR*2+w.h+32+listH+FOOT;
   const c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");
@@ -1382,7 +1398,7 @@ async function buildResultCard(d){
   // Header
   x.textBaseline="alphabetic";
   x.fillStyle=CARD.gilt;x.font=`700 20px ${CARD.body}`;x.fillText(GAME_TITLE.split("").join(String.fromCharCode(8202)),P,P+20);
-  x.fillStyle=CARD.ink;x.font=`800 40px ${CARD.disp}`;x.fillText(`『${w.title}』の修復結果`,P,P+70);
+  x.fillStyle=CARD.ink;x.font=`800 40px ${CARD.disp}`;x.fillText(d.practice?`『${w.title}』${d.cellLabel}を修復`:`『${w.title}』の修復結果`,P,P+70);
   // Frame and painting
   const fx=P,fy=P+HEAD,px=fx+FR,py=fy+FR;
   const gold=x.createLinearGradient(fx,fy,fx+w.w+FR*2,fy+w.h+FR*2);
@@ -1407,21 +1423,35 @@ async function buildResultCard(d){
   x.fillStyle=CARD.panel;rr(x,x,lx,ly,lw,listH,12);x.fill();x.strokeStyle=CARD.line;x.lineWidth=1.5;x.stroke();
   x.fillStyle=CARD.muted;x.font=`400 18px ${CARD.body}`;
   x.fillText(`${w.artist} / ${w.year}`,lx+24,ly+40);
-  x.fillText(`${d.names.length}人の修復士による合作`,lx+24,ly+68);
-  x.fillStyle=CARD.gilt;x.font=`700 16px ${CARD.body}`;x.fillText("順位",lx+24,ly+106);
-  x.textAlign="right";x.fillText("得点",lx+lw-24,ly+106);x.textAlign="left";
-  ranked.forEach((r,k)=>{const y=ly+160+k*ROW;
-    x.strokeStyle=CARD.line;x.beginPath();x.moveTo(lx+20,y-40);x.lineTo(lx+lw-20,y-40);x.stroke();
-    const top=r.rank===1;x.fillStyle=top?CARD.gilt:CARD.ink;
-    x.font=`800 28px ${CARD.disp}`;x.fillText(`${r.rank}位`,lx+24,y);
-    let nx=lx+96;if(top){x.font=`26px ${CARD.body}`;x.fillText("👑",nx,y);nx+=38}
-    x.fillStyle=PLAYER_COLORS[r.i%8];x.beginPath();x.arc(nx+8,y-9,8,0,Math.PI*2);x.fill();
-    x.fillStyle=top?CARD.gilt:CARD.ink;x.font=`700 24px ${CARD.body}`;
-    const maxName=lx+lw-24-90-(nx+26);let nm=r.name;while(x.measureText(nm).width>maxName&&nm.length>1)nm=nm.slice(0,-1);
-    x.fillText(nm===r.name?nm:nm+"…",nx+26,y);
-    x.textAlign="right";x.font=`800 30px ${CARD.disp}`;x.fillText(`${r.total}`,lx+lw-56,y);
-    x.font=`400 16px ${CARD.body}`;x.fillText("点",lx+lw-24,y);x.textAlign="left";
-  });
+  if(d.practice){
+    x.fillText(`一人練習 · マス ${d.cellLabel}`,lx+24,ly+68);
+    if(d.showScore){
+      x.fillStyle=CARD.gilt;x.font=`700 16px ${CARD.body}`;x.fillText("原画との一致度",lx+24,ly+112);
+      x.fillStyle=CARD.ink;x.font=`800 96px ${CARD.disp}`;x.fillText(`${d.score}`,lx+24,ly+206);
+      const sw=x.measureText(`${d.score}`).width;
+      x.fillStyle=CARD.muted;x.font=`400 28px ${CARD.body}`;x.fillText("%",lx+34+sw,ly+206);
+      x.fillStyle=CARD.gilt;x.font=`800 34px ${CARD.disp}`;x.fillText(d.rankTitle,lx+24,ly+264);
+      x.fillStyle=CARD.muted;x.font=`400 17px ${CARD.body}`;x.fillText(d.note,lx+24,ly+302);
+    }else{
+      x.fillStyle=CARD.ink;x.font=`700 22px ${CARD.body}`;x.fillText(`修復:${d.names[0]}`,lx+24,ly+112);
+    }
+  }else{
+    x.fillText(`${d.names.length}人の修復士による合作`,lx+24,ly+68);
+    x.fillStyle=CARD.gilt;x.font=`700 16px ${CARD.body}`;x.fillText("順位",lx+24,ly+106);
+    x.textAlign="right";x.fillText("得点",lx+lw-24,ly+106);x.textAlign="left";
+    ranked.forEach((r,k)=>{const y=ly+160+k*ROW;
+      x.strokeStyle=CARD.line;x.beginPath();x.moveTo(lx+20,y-40);x.lineTo(lx+lw-20,y-40);x.stroke();
+      const top=r.rank===1;x.fillStyle=top?CARD.gilt:CARD.ink;
+      x.font=`800 28px ${CARD.disp}`;x.fillText(`${r.rank}位`,lx+24,y);
+      let nx=lx+96;if(top){x.font=`26px ${CARD.body}`;x.fillText("👑",nx,y);nx+=38}
+      x.fillStyle=PLAYER_COLORS[r.i%8];x.beginPath();x.arc(nx+8,y-9,8,0,Math.PI*2);x.fill();
+      x.fillStyle=top?CARD.gilt:CARD.ink;x.font=`700 24px ${CARD.body}`;
+      const maxName=lx+lw-24-90-(nx+26);let nm=r.name;while(x.measureText(nm).width>maxName&&nm.length>1)nm=nm.slice(0,-1);
+      x.fillText(nm===r.name?nm:nm+"…",nx+26,y);
+      x.textAlign="right";x.font=`800 30px ${CARD.disp}`;x.fillText(`${r.total}`,lx+lw-56,y);
+      x.font=`400 16px ${CARD.body}`;x.fillText("点",lx+lw-24,y);x.textAlign="left";
+    });
+  }
   // Footer
   x.fillStyle=CARD.muted;x.font=`400 16px ${CARD.body}`;
   x.fillText(d.credit,P,H-P/2-4);
@@ -1431,15 +1461,22 @@ const cardName=d=>{const t=new Date(),z=n=>String(n).padStart(2,"0");
   return `shufukushi-${d.work.id}-${t.getFullYear()}${z(t.getMonth()+1)}${z(t.getDate())}-${z(t.getHours())}${z(t.getMinutes())}.png`};
 
 // Online: save directly, share with the image on phones, post text + link to X
-function cardData(){return{work:G.work,N:G.N,tiles:G.board,owner:G.owner,names:G.players.map(p=>p.name),rows:score(),view:G.view,
+function cardData(){
+  if(G.practice&&G.practiceResult){const p=G.practiceResult;
+    return{practice:true,work:G.work,N:G.N,tiles:p.tiles,owner:p.tiles.map((_,i)=>i===p.cell?0:-1),names:[me.name||"あなた"],view:G.view,
+      showScore:G.showScore,score:p.score,rankTitle:p.title,note:p.note,cellLabel:cellName(p.cell,G.N),
+      credit:`${GAME_TITLE} · ${(location.host+location.pathname).replace(/\/(index\.html)?$/,"")}`}}
+  return{work:G.work,N:G.N,tiles:G.board,owner:G.owner,names:G.players.map(p=>p.name),rows:score(),view:G.view,
   credit:`${GAME_TITLE} · ${(location.host+location.pathname).replace(/\/(index\.html)?$/,"")}`}}
 const gameURL=()=>location.origin+location.pathname;
+const xIntentURL=()=>`https://x.com/intent/post?text=${encodeURIComponent(shareText(cardData()))}&url=${encodeURIComponent(gameURL())}`;
+// Something that changes the image or the post text: rebuild the image and refresh the X link
+function refreshShare(){const a=document.getElementById("postX");if(a)a.href=xIntentURL();prepareCard()}
 const canShareFiles=()=>{try{return!!(navigator.canShare&&navigator.canShare({files:[new File(["x"],"a.png",{type:"image/png"})]}))}catch(e){return false}};
 // Phones only open the share sheet straight after a tap, so the image is prepared ahead of time
 function prepareCard(){const d=cardData();G.card={d,promise:buildResultCard(d).then(b=>(G.card&&G.card.d===d&&(G.card.blob=b),b))};return G.card.promise}
 function shareBarHTML(){
-  const xUrl=`https://x.com/intent/post?text=${encodeURIComponent(shareText(cardData()))}&url=${encodeURIComponent(gameURL())}`;
-  return `<div class="row sharebar"><button class="primary" id="saveImg">画像を保存</button>${canShareFiles()?`<button id="shareImg">画像付きで共有</button>`:""}<a class="btnlink" href="${esc(xUrl)}" target="_blank" rel="noopener">Xに投稿</a></div>`;
+  return `<div class="row sharebar"><button class="primary" id="saveImg">画像を保存</button>${canShareFiles()?`<button id="shareImg">画像付きで共有</button>`:""}<a class="btnlink" id="postX" href="${esc(xIntentURL())}" target="_blank" rel="noopener">Xに投稿</a></div>`;
 }
 function bindShareBar(){
   prepareCard();
