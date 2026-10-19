@@ -114,7 +114,7 @@ input,select{font-family:var(--body);font-size:15px;background:var(--wall);color
 #ref{cursor:crosshair}
 #pad{touch-action:none;cursor:crosshair}
 .refmeta{display:flex;gap:10px;align-items:center}
-.mini{width:64px;flex:none;position:relative}
+.mini{width:64px;flex:none;position:relative;overflow:hidden}
 .mini img{display:block;width:100%;opacity:.75}
 .mini .hl{position:absolute;outline:2px solid var(--gilt);box-shadow:0 0 0 999px rgba(0,0,0,.35)}
 .cellname{font-family:var(--display);font-size:28px;font-weight:800;line-height:1}
@@ -135,7 +135,18 @@ input,select{font-family:var(--body);font-size:15px;background:var(--wall);color
 .sizes{display:flex;gap:6px}
 .sizes button{width:40px;height:40px;padding:0;display:grid;place-items:center}
 .sizes button[aria-pressed="true"],.tool[aria-pressed="true"]{border-color:var(--gilt);background:var(--sel)}
-.sizes i{display:block;background:var(--ink)}
+.sizes i{display:block;background:var(--ink);border-radius:50%}
+/* Drawing screens use the full window width on PCs; each painting frame is capped so it fits the window height */
+.wrap.wide{max-width:1680px}
+.stage .frame{width:100%;max-width:max(260px,calc((100vh - 400px) * var(--ar) + 12px));margin-inline:auto}
+/* Result reveal: rows rise from last place up to first */
+tr.rise{animation:rise .6s cubic-bezier(.2,.8,.2,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+.crown{display:inline-block;margin-right:4px;font-size:1.15em;line-height:1}
+.rise .crown{animation:crown .7s cubic-bezier(.2,1.6,.4,1) both}
+@keyframes crown{from{opacity:0;transform:scale(0) rotate(-25deg)}to{opacity:1;transform:none}}
+td.rank{font-family:var(--display);font-weight:800;white-space:nowrap;text-align:left}
+@media (prefers-reduced-motion:reduce){tr.rise,.rise .crown{animation:none}}
 .hint{font-size:12px;color:var(--muted)}
 
 /* Composite */
@@ -158,7 +169,7 @@ input,select{font-family:var(--body);font-size:15px;background:var(--wall);color
 table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
 th,td{padding:9px 8px;text-align:right;border-bottom:1px solid var(--line)}
 th{font-size:12px;color:var(--muted);font-weight:500;letter-spacing:.05em}
-td:first-child,th:first-child{text-align:left}
+td:first-child,th:first-child,td:nth-child(2),th:nth-child(2){text-align:left}
 tr.top td{color:var(--gilt);font-weight:700}
 td.total{font-family:var(--display);font-size:20px;font-weight:800}
 .tablewrap{overflow-x:auto}
@@ -183,6 +194,18 @@ td.total{font-family:var(--display);font-size:20px;font-weight:800}
 .facts{display:flex;flex-wrap:wrap;gap:6px}
 .facts span{font-size:12px;padding:3px 9px;border-radius:99px;background:var(--wall-2);border:1px solid var(--line)}
 .status{font-size:12px;color:var(--muted)}
+.solo{flex-direction:row;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.gridover.pick{pointer-events:auto}
+.gridover.pick button{border:1px solid rgba(240,230,210,.35);border-radius:0;background:transparent;padding:1px 3px;font-size:10px;line-height:1.2;color:rgba(240,230,210,.85);text-shadow:0 1px 2px #000;display:flex;align-items:flex-start;justify-content:flex-start;min-width:0}
+.gridover.pick button:hover:not(:disabled){background:rgba(207,166,91,.25)}
+.gridover.pick button[aria-pressed="true"]{background:rgba(207,166,91,.35);outline:2px solid var(--gilt);outline-offset:-2px;color:#fff}
+.gridover.pick button.plain{background:repeating-linear-gradient(45deg,rgba(240,230,210,.16) 0 4px,transparent 4px 10px);opacity:1}
+.compare{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.compare figure{margin:0;display:flex;flex-direction:column;gap:6px}
+.compare figcaption{font-size:12px;color:var(--muted)}
+.compare img{display:block;width:100%}
+.score{display:flex;align-items:baseline;gap:4px;margin:0}
+.score .bignum{font-size:64px}
 </style>
 </head>
 <body>
@@ -216,7 +239,7 @@ const workOf=id=>WORKS.find(w=>w.id===id)||WORKS[0];
 const cellName=(i,N)=>LETTERS[i%N]+(Math.floor(i/N)+1);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const shuffle=a=>{for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a};
-const h=html=>{app.innerHTML=html;window.scrollTo(0,0)};
+const h=html=>{app.classList.remove("wide");app.innerHTML=html;window.scrollTo(0,0)};
 const isPng=s=>typeof s==="string"&&s.startsWith("data:image/png;base64,")&&s.length<3e6;
 const dot=(pi,size=12)=>{const s=typeof size==="number"?size+"px":size;return `<span class="dot" style="display:inline-block;width:${s};height:${s};vertical-align:middle;background:${PLAYER_COLORS[pi%8]}"></span>`};
 // Everything below arrives from other players' browsers, so it is coerced to known shapes before use
@@ -338,7 +361,13 @@ function renderHome(msg=""){
       <button class="primary" id="join">参加する</button>
     </div>
   </section>
+  <div class="panel solo">
+    <div style="display:flex;flex-direction:column;gap:4px;min-width:0"><h3>一人で練習</h3>
+      <p class="muted" style="font-size:13px">好きな絵とマスを選んで模写し、原画との一致度を採点します。通信はしません。</p></div>
+    <button id="practice">練習する</button>
+  </div>
   <p class="err" id="err" role="alert">${esc(msg)}</p>`);
+  document.getElementById("practice").onclick=()=>{const n=document.getElementById("myname").value.trim().slice(0,10);if(n){me.name=n;store.set("shufukushi-name",n)}renderPracticeSetup()};
   const nameOk=()=>{me.name=document.getElementById("myname").value.trim().slice(0,10);
     if(!me.name){showErr("名前を入力してください。");document.getElementById("myname").focus();return false}
     store.set("shufukushi-name",me.name);return true};
@@ -346,6 +375,136 @@ function renderHome(msg=""){
   document.getElementById("join").onclick=()=>{if(!nameOk())return;
     const c=document.getElementById("joincode").value.trim().toUpperCase();
     if(!/^[A-Z]{4}$/.test(c)){showErr("部屋のコードは英字4文字です。");return}joinRoom(c)};
+}
+
+/* ---------- Solo practice ---------- */
+// Practice runs entirely in this browser: no room, no network
+const P={work:"mona",grid:4,seconds:90,guide:false,peek:false,cell:-1}; // cell -1 means a random tile
+const bestKey=(w,N,c)=>`shufukushi-best-${w}-${N}-${c}`;
+function renderPracticeSetup(){
+  screen="practice";
+  const w=workOf(P.work),N=P.grid,cells=N*N,plain=plainTiles(w,N);
+  if(P.cell>=cells||plain.has(P.cell))P.cell=-1;
+  h(`
+  <header class="row" style="align-items:flex-end">
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <span class="eyebrow">一人で練習</span>
+      <h1>修復士たちの懸命な努力</h1>
+    </div>
+    <span class="spacer"></span>
+    <button id="back">最初の画面に戻る</button>
+  </header>
+  <section class="setup">
+    <div class="art" style="display:flex;flex-direction:column;gap:10px">
+      <div class="frame"><div class="inner">
+        <img class="pix" src="${w.src}" alt="お題:${esc(w.title)}" style="aspect-ratio:${w.w}/${w.h}">
+        <div class="gridover pick" style="grid-template-columns:repeat(${N},1fr);grid-template-rows:repeat(${N},1fr)">${[...Array(cells)].map((_,i)=>
+          `<button class="${plain.has(i)?"plain":""}" data-c="${i}" aria-pressed="${i===P.cell}" ${plain.has(i)?"disabled":""} aria-label="マス ${cellName(i,N)}">${cellName(i,N)}</button>`).join("")}</div>
+      </div></div>
+      <p class="hint">絵のマスを押すと、そのマスを練習できます。もう一度押すとランダムに戻ります。斜線のマスはほぼ1色なので選べません。</p>
+      <p class="plaque"><b>${esc(w.title)}(${w.palette.length}色版)</b><br>${esc(w.artist)} / ${esc(w.year)}<br>${esc(w.medium)}</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:18px">
+      <div class="panel">
+        <div class="field"><span class="label">お題の絵</span>
+          <div class="works">${WORKS.map(x=>`<button class="work" data-w="${x.id}" aria-pressed="${x.id===P.work}"><img class="pix" src="${x.src}" alt=""><span>${esc(x.title)}<small>${esc(x.artistShort)}</small></span></button>`).join("")}</div>
+        </div>
+        <div class="row" style="gap:24px;align-items:flex-start">
+          <div class="field"><span class="label">分割数</span>
+            <div class="seg" id="grid">${[4,5,6].map(g=>`<button data-g="${g}" aria-pressed="${g===N}">${g}×${g}</button>`).join("")}</div>
+          </div>
+          <label class="field"><span class="label">制限時間</span>
+            <select id="secs">${[[0,"なし"],[60,"60秒"],[90,"90秒"],[120,"120秒"],[180,"180秒"]].map(([v,t])=>`<option value="${v}" ${v===P.seconds?"selected":""}>${t}</option>`).join("")}</select>
+          </label>
+        </div>
+        <div class="field"><span class="label">描画サポート</span>
+          <div class="seg">
+            <button class="toggle" id="tguide" aria-pressed="${P.guide}"><span class="sw-state">${P.guide?"オン":"オフ"}</span>十字の補助線</button>
+            <button class="toggle" id="tpeek" aria-pressed="${P.peek}"><span class="sw-state">${P.peek?"オン":"オフ"}</span>隣のマスを少し見せる</button>
+          </div>
+        </div>
+        <p class="alloc">練習するマス:<b>${P.cell>=0?cellName(P.cell,N):"ランダム"}</b>。描き終えると、原画とどれだけ一致したかを採点します。</p>
+        <button class="primary" id="start">練習を始める</button>
+      </div>
+    </div>
+  </section>`);
+  document.getElementById("back").onclick=()=>{G=null;renderHome()};
+  document.querySelectorAll(".work").forEach(b=>b.onclick=()=>{P.work=b.dataset.w;P.cell=-1;renderPracticeSetup()});
+  document.querySelectorAll("#grid button").forEach(b=>b.onclick=()=>{P.grid=+b.dataset.g;P.cell=-1;renderPracticeSetup()});
+  document.querySelectorAll(".gridover.pick button").forEach(b=>b.onclick=()=>{const c=+b.dataset.c;P.cell=P.cell===c?-1:c;renderPracticeSetup()});
+  document.getElementById("secs").onchange=e=>{P.seconds=+e.target.value};
+  document.getElementById("tguide").onclick=()=>{P.guide=!P.guide;renderPracticeSetup()};
+  document.getElementById("tpeek").onclick=()=>{P.peek=!P.peek;renderPracticeSetup()};
+  document.getElementById("start").onclick=()=>startPractice();
+}
+function startPractice(cell){
+  const w=workOf(P.work),N=P.grid,plain=plainTiles(w,N);
+  const pool=[...Array(N*N).keys()].filter(i=>!plain.has(i));
+  if(cell===undefined)cell=P.cell>=0?P.cell:pool[Math.floor(Math.random()*pool.length)];
+  G={work:w,N,cw:w.w/N,ch:w.h/N,per:1,seconds:P.seconds,guide:P.guide,peek:P.peek,
+     players:[{id:"me",name:me.name||"あなた"}],me:0,myCells:[cell],practice:true,guideShown:true};
+  const t0=Date.now();
+  screen="draw";
+  drawCell(cell,0,1,png=>renderPracticeResult(cell,png,Date.now()-t0));
+}
+// Match = share of pixels whose paint color also appears within one pixel in the original (forgives tiny offsets),
+// rescaled so an untouched canvas scores 0
+function practiceScore(work,N,cell,png){
+  return new Promise(res=>{const im=new Image();im.onload=()=>{
+    const cw=work.w/N,ch=work.h/N,n=cw*ch;
+    const c=document.createElement("canvas");c.width=cw;c.height=ch;const x=c.getContext("2d",{willReadFrequently:true});x.imageSmoothingEnabled=false;
+    x.drawImage(loaded[work.id],(cell%N)*cw,Math.floor(cell/N)*ch,cw,ch,0,0,cw,ch);const od=x.getImageData(0,0,cw,ch).data;
+    x.clearRect(0,0,cw,ch);x.drawImage(im,0,0);const md=x.getImageData(0,0,cw,ch).data;
+    const near=nearestOf(work.palette),O=new Uint8Array(n),M=new Uint8Array(n);
+    for(let i=0;i<n;i++){O[i]=near(od[i*4],od[i*4+1],od[i*4+2]);M[i]=near(md[i*4],md[i*4+1],md[i*4+2])}
+    const match=X=>{let hit=0;
+      for(let y=0;y<ch;y++)for(let xx=0;xx<cw;xx++){const v=X[y*cw+xx];let ok=false;
+        for(let dy=-1;dy<=1&&!ok;dy++)for(let dx=-1;dx<=1;dx++){const yy=y+dy,x2=xx+dx;if(yy>=0&&yy<ch&&x2>=0&&x2<cw&&O[yy*cw+x2]===v){ok=true;break}}
+        if(ok)hit++}
+      return hit/n};
+    const paper=work.palette.indexOf(work.palette.slice().sort((a,b)=>lum(b)-lum(a))[0]);
+    const raw=match(M),blank=match(new Uint8Array(n).fill(paper));
+    res(blank>=1?Math.round(raw*100):Math.max(0,Math.round((raw-blank)/(1-blank)*100)));
+  };im.src=png});
+}
+const RANKS=[[85,"名修復士","原画と見分けがつきません。"],[70,"腕利きの修復士","遠目にはまず気づかれません。"],[50,"一人前の修復士","よく見ると筆の違いがわかります。"],[30,"見習いの修復士","形はとらえています。色の範囲をもう少し丁寧に。"],[0,"善意の修復","気持ちは伝わります。"]];
+async function renderPracticeResult(cell,png,ms){
+  screen="practiceResult";
+  const w=G.work,N=G.N,score=await practiceScore(w,N,cell,png);
+  const key=bestKey(w.id,N,cell),prev=+(store.get(key)||-1),isBest=score>prev;
+  if(isBest)store.set(key,String(score));
+  const [,title,note]=RANKS.find(([min])=>score>=min);
+  const tiles=[...Array(N*N)].map((_,i)=>i===cell?png:cropURL(w,N,i));
+  const ar=`${w.w}/${w.h}`;
+  h(`
+  <div style="display:flex;flex-direction:column;gap:4px"><span class="eyebrow">練習結果 · ${esc(w.title)} ${cellName(cell,N)}</span><h2>${title}</h2></div>
+  <section class="two">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="compare">
+        <figure><div class="frame" style="padding:6px"><div class="inner"><img class="pix" src="${esc(cropURL(w,N,cell))}" alt="原画" style="aspect-ratio:${ar}"></div></div><figcaption>原画</figcaption></figure>
+        <figure><div class="frame" style="padding:6px;background:#3a2e22"><div class="inner"><img class="pix" src="${esc(png)}" alt="あなたの修復" style="aspect-ratio:${ar}"></div></div><figcaption>あなたの修復</figcaption></figure>
+      </div>
+      <span class="label">絵に戻すとこう見えます</span>
+      <div class="boardwrap">${boardHTML(tiles,{tag:i=>i===cell?`<span class="tag" style="background:var(--gilt)">あなた</span>`:""})}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="panel">
+        <span class="label">原画との一致度</span>
+        <p class="score"><span class="bignum">${score}</span><span class="muted">%</span></p>
+        <p class="muted">${note}</p>
+        <div class="facts"><span>かかった時間 ${Math.round(ms/1000)}秒</span><span>${isBest?(prev<0?"このマスの初記録":"自己ベスト更新"):`自己ベスト ${prev}%`}</span></div>
+      </div>
+      <p class="hint">一致度は、描いた色が原画の同じ場所(1ドットのずれまで許容)と合っている割合です。何も描かなければ0%になります。</p>
+      <div class="row">
+        <button class="primary" id="again">同じマスでもう一度</button>
+        <button id="other">別のマスで練習</button>
+        <button id="settings">設定を変える</button>
+      </div>
+    </div>
+  </section>`);
+  document.getElementById("again").onclick=()=>startPractice(cell);
+  document.getElementById("other").onclick=()=>{P.cell=-1;startPractice()};
+  document.getElementById("settings").onclick=renderPracticeSetup;
 }
 const showErr=m=>{const e=document.getElementById("err");if(e)e.textContent=m};
 function renderConnecting(text){screen="connecting";h(`<section class="pass"><span class="eyebrow">接続中</span><p class="muted">${esc(text)}</p><button id="cancel">やめる</button></section>`);
@@ -662,7 +821,7 @@ function drawCell(cell,k,total,done){
   const swatch=col=>`<button class="sw" style="background:${col}" data-c="${col}" aria-label="色 ${col}" aria-pressed="false"></button>`;
   const m=G.peek?Math.round(Math.min(cw,ch)*.18):0,FW=cw+2*m,FH=ch+2*m;
   const place=`left:${m/FW*100}%;top:${m/FH*100}%;width:${cw/FW*100}%;height:${ch/FH*100}%`;
-  const tileBox=(id,label,bg)=>`<div class="frame" style="padding:6px${bg?";background:"+bg:""}"><div class="inner box${m?" peek":""}" style="aspect-ratio:${FW}/${FH}">
+  const tileBox=(id,label,bg)=>`<div class="frame" style="padding:6px;--ar:${FW/FH}${bg?";background:"+bg:""}"><div class="inner box${m?" peek":""}" style="aspect-ratio:${FW}/${FH}">
       ${m?`<canvas class="pix ctx" width="${FW}" height="${FH}"></canvas>`:""}
       <canvas class="pix tile" id="${id}" width="${cw}" height="${ch}" style="${place}" aria-label="${label}"></canvas>
       ${G.guide?`<div class="guide" style="${place}" ${G.guideShown?"":"hidden"}></div>`:""}
@@ -671,7 +830,7 @@ function drawCell(cell,k,total,done){
   h(`
   <div class="drawhead">
     <span class="label">${dot(G.me,9)} ${esc(G.players[G.me].name)} · ${k+1} / ${total}マス目</span>
-    <div class="timer" id="timer"><div class="bar"><i id="barfill"></i></div><output id="tleft">${G.seconds}</output></div>
+    ${G.seconds?`<div class="timer" id="timer"><div class="bar"><i id="barfill"></i></div><output id="tleft">${G.seconds}</output></div>`:`<div class="timer"><span class="label">制限時間なし</span></div>`}
     <button class="primary" id="done">${k+1<total?"このマスを完成":"描き終える"}</button>
   </div>
   <section class="stage">
@@ -705,6 +864,7 @@ function drawCell(cell,k,total,done){
     </div>
   </div>`);
 
+  app.classList.add("wide");
   const ref=document.getElementById("ref"),rc=ref.getContext("2d",{willReadFrequently:true});
   rc.imageSmoothingEnabled=false;rc.drawImage(loaded[w.id],c*cw,r*ch,cw,ch,0,0,cw,ch);
   if(m)document.querySelectorAll("canvas.ctx").forEach(cv=>{const x=cv.getContext("2d");x.imageSmoothingEnabled=false;
@@ -790,7 +950,7 @@ function drawCell(cell,k,total,done){
   let finished=false;
   const finish=()=>{if(finished)return;finished=true;clearInterval(timerId);drawing=false;done(pad.toDataURL("image/png"))};
   clearInterval(timerId);
-  timerId=setInterval(()=>{const left=Math.max(0,limit-(performance.now()-t0));
+  if(limit)timerId=setInterval(()=>{const left=Math.max(0,limit-(performance.now()-t0));
     out.textContent=Math.ceil(left/1000);fillEl.style.width=(left/limit*100)+"%";
     tbox.classList.toggle("hurry",left<=10000);if(left<=0)finish()},200);
   document.getElementById("done").onclick=finish;
@@ -810,6 +970,7 @@ function renderWait(){
 }
 
 /* ---------- Phase timers ---------- */
+const RANK_STEP=.8; // seconds between result rows
 const REVEAL_SECONDS=5,GUESS_SECONDS=30;
 // Runs a countdown on the shared timer: tick(msLeft) on every beat, end() once at zero
 function countdown(ms,tick,end){
@@ -884,6 +1045,8 @@ function score(){
   }).filter(Boolean);
 }
 function renderResult(showOriginal=false){
+  // Rows animate in only the first time the result is shown, not when toggling the original
+  const animate=!G.resultShown;G.resultShown=true;
   screen="result";
   const rows=score().sort((a,b)=>b.total-a.total),best=rows.length?rows[0].total:0;
   const voters=G.players.map((_,gi)=>gi).filter(gi=>G.guesses[gi]);
@@ -901,8 +1064,9 @@ function renderResult(showOriginal=false){
     </div>
     <div style="display:flex;flex-direction:column;gap:16px">
       <div class="tablewrap"><table>
-        <thead><tr><th>プレイヤー</th><th>的中</th><th>逃げ切り</th><th>合計</th></tr></thead>
-        <tbody>${rows.map(r=>`<tr class="${r.total===best?"top":""}"><td>${dot(r.i)} ${esc(r.name)}${r.i===G.me?"(あなた)":""}</td><td>${r.hit}</td><td>${r.hidden}</td><td class="total">${r.total}</td></tr>`).join("")}</tbody>
+        <thead><tr><th>順位</th><th>プレイヤー</th><th>的中</th><th>逃げ切り</th><th>合計</th></tr></thead>
+        <tbody>${rows.map((r,idx)=>{const rank=1+rows.filter(x=>x.total>r.total).length,delay=(rows.length-1-idx)*RANK_STEP;
+          return `<tr class="${r.total===best?"top":""}${animate?" rise":""}" style="${animate?`animation-delay:${delay}s`:""}"><td class="rank">${rank}位</td><td>${rank===1?`<span class="crown" style="${animate?`animation-delay:${delay+.45}s`:""}" aria-hidden="true">👑</span>`:""}${dot(r.i)} ${esc(r.name)}${r.i===G.me?"(あなた)":""}</td><td>${r.hit}</td><td>${r.hidden}</td><td class="total">${r.total}</td></tr>`}).join("")}</tbody>
       </table></div>
       <p class="hint">的中:選んだマスのうち手描きだった数(+1点ずつ)/ 逃げ切り:自分のマスを選ばなかった人の数を、担当マスごとに合計(+1点ずつ)</p>
       <div class="row">
