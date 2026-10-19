@@ -158,6 +158,9 @@ td.rank{font-family:var(--display);font-weight:800;white-space:nowrap;text-align
   box-shadow:0 10px 30px rgba(0,0,0,.5);animation:toast 2.2s ease both;pointer-events:none}
 @keyframes toast{0%{opacity:0;transform:translate(-50%,-12px)}12%{opacity:1;transform:translate(-50%,0)}80%{opacity:1}100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}}
+/* Automatic countdowns (no button) */
+.countdown{margin:0;font-size:15px;color:var(--muted);display:flex;align-items:baseline;gap:8px;justify-content:center}
+.countdown b{font-family:var(--display);font-size:40px;font-weight:800;color:var(--gilt);font-variant-numeric:tabular-nums;min-width:1.2ch;text-align:center}
 .snd{font-size:13px;padding:8px 12px}
 .hint{font-size:12px;color:var(--muted)}
 
@@ -340,7 +343,7 @@ function discSpans(d){
 const me={name:store.get("shufukushi-name")||"",pid:null,seat:null};
 const HOST_PID="h";
 let net=null;          // host: {peer,isHost,code,conns,peerToPid,bySeat,status,route}  guest: {peer,isHost,code,host,joined,outbox,giveUp}
-let L={players:[],settings:{work:"mona",grid:4,per:1,seconds:90,guide:false,peek:false},status:{},route:{}}; // lobby, host is authority
+let L={players:[],settings:{work:"mona",grid:5,per:1,seconds:90,guide:true,peek:true},status:{},route:{}}; // lobby, host is authority
 let H=null;            // host-only game record
 let G=null;            // this player's view of the current game
 let screen="home",timerId=null;
@@ -440,7 +443,7 @@ function renderHome(msg=""){
 
 /* ---------- Solo practice ---------- */
 // Practice runs entirely in this browser: no room, no network
-const P={work:"mona",grid:4,seconds:90,guide:false,peek:false,cell:-1}; // cell -1 means a random tile
+const P={work:"mona",grid:5,seconds:90,guide:true,peek:true,cell:-1}; // cell -1 means a random tile
 const bestKey=(w,N,c)=>`shufukushi-best-${w}-${N}-${c}`;
 function renderPracticeSetup(){
   screen="practice";
@@ -1004,10 +1007,9 @@ function renderIntro(){
     <span class="eyebrow">修復開始</span>
     <div class="who">${dot(G.me,"0.45em")} ${esc(G.players[G.me].name)} さん</div>
     <p class="ban">お題は「${esc(G.work.title)}」。あなたの担当は ${G.myCells.length}マス、1マスの制限時間は ${G.seconds}秒です。描画サポート:補助線 ${G.guide?"オン":"オフ"} · 隣のマス ${G.peek?"オン":"オフ"}</p>
-    <button class="primary" id="go" style="font-size:17px;padding:14px 28px">描きはじめる(<span id="cd">${left}</span>)</button>
+    <p class="countdown" aria-live="polite">描きはじめるまで <b id="cd">${left}</b> 秒</p>
   </section>`);
   const go=()=>{clearInterval(timerId);startDrawing()};
-  document.getElementById("go").onclick=go;
   clearInterval(timerId);
   timerId=setInterval(()=>{left--;const e=document.getElementById("cd");if(e)e.textContent=left;if(left<=0)go()},1000);
 }
@@ -1245,11 +1247,10 @@ function renderReveal(){
     <span class="eyebrow">修復完了</span>
     <h2>${G.players.length}人の修復による「${esc(G.work.title)}」</h2>
     <div class="boardwrap" style="max-width:${G.work.w>G.work.h?680:520}px">${boardHTML(G.board,{flip:true,order})}</div>
-    <p class="muted" style="max-width:32em">どのマスが手描きか、よく見てください。${REVEAL_SECONDS}秒後に推理が始まります。</p>
-    <button class="primary" id="go">推理へ進む(<span id="cd">${REVEAL_SECONDS}</span>)</button>
+    <p class="muted" style="max-width:32em">どのマスが手描きか、よく見てください。</p>
+    <p class="countdown" aria-live="polite">推理が始まるまで <b id="cd">${REVEAL_SECONDS}</b> 秒</p>
   </section>`);
-  const stop=countdown(REVEAL_SECONDS*1000,left=>{const e=document.getElementById("cd");if(e)e.textContent=Math.ceil(left/1000)},renderGuess);
-  document.getElementById("go").onclick=()=>{stop();renderGuess()};
+  countdown(REVEAL_SECONDS*1000,left=>{const e=document.getElementById("cd");if(e)e.textContent=Math.ceil(left/1000)},renderGuess);
 }
 
 /* ---------- Guess ---------- */
