@@ -162,62 +162,59 @@ td.rank{font-family:var(--display);font-weight:800;white-space:nowrap;text-align
 .countdown{margin:0;font-size:15px;color:var(--muted);display:flex;align-items:baseline;gap:8px;justify-content:center}
 .countdown b{font-family:var(--display);font-size:40px;font-weight:800;color:var(--gilt);font-variant-numeric:tabular-nums;min-width:1.2ch;text-align:center}
 .snd{font-size:13px;padding:8px 12px}
-/* Drawing layout. Landscape: reference | canvas | paints over brushes, filling the window height.
-   Portrait: reference beside the paints, a full-width canvas, brushes along the bottom.
-   Each painting box is a size container, so frames scale to the largest size that keeps their proportions. */
+/* Drawing layout: one large canvas, and a side panel holding the reference with every tool.
+   Landscape (PC, tablet): canvas on the left, the panel as a right-hand column.
+   Portrait (phone): canvas on top, the panel underneath with the reference beside paints and brushes.
+   The canvas box is a size container, so its frame scales to the largest size that keeps its proportions. */
 .dwrap{display:grid;grid-template-rows:auto minmax(0,1fr);gap:12px;height:calc(100dvh - 28px);min-height:440px}
 /* While drawing the screen belongs to the drawing: no footer, minimal page padding, nothing to scroll */
 body:has(#app.wide){padding-block:12px}
 #app.wide~.credit{display:none}
-.dbar .snd,.dbar #done{white-space:nowrap}
-.dref .hint .short{display:none}
 .dbar{display:flex;align-items:center;gap:10px;min-width:0}
+.dbar .snd,.dbar #done{white-space:nowrap}
 .dbar .dwho{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
 .dcell{font-family:var(--display);font-size:17px;font-weight:800;color:var(--ink);letter-spacing:.02em}
 .dbar .timer{flex:1 1 120px;min-width:80px}
-.dmain{display:grid;min-height:0;gap:16px;
-  grid-template-columns:minmax(0,1.7fr) minmax(0,3fr) minmax(210px,250px);
-  grid-template-rows:auto minmax(0,1fr);
-  grid-template-areas:"ref canvas palette" "ref canvas brush"}
-/* Wide tiles: give the canvas more of the row, since its width is what limits it */
-.dmain.widetile{grid-template-columns:minmax(0,1.25fr) minmax(0,3fr) minmax(210px,250px)}
-.dref{grid-area:ref;display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0}
-/* The reference box holds the picture with its hint and location right underneath; the picture is kept to about 3/4 of the column height */
-.dref .refbox{flex:1 1 auto;flex-direction:column;align-items:center;justify-content:flex-start;gap:8px}
-.dref .refbox>.frame{width:min(100cqw,calc((78cqh - 70px) * var(--ar) + 12px))}
-.dref .refbox>.hint,.dref .refbox>.refmeta{align-self:stretch;margin:0}
-.dcanvas{grid-area:canvas}
+/* Landscape: the canvas column is as wide as the painting needs at full height, and the canvas and panel
+   are centred together so there is no gap between them */
+.dmain{display:flex;justify-content:center;align-items:stretch;min-height:0;gap:24px}
+.dcanvas{flex:0 1 calc((100dvh - 100px) * var(--car) + 12px);min-width:0}
+.dside{flex:0 0 clamp(270px,23vw,340px)}
 .fitbox{container-type:size;display:flex;align-items:center;justify-content:center;min-width:0;min-height:0}
-.fitbox.top{align-items:flex-start}
 .fitbox>.frame{flex:none;width:100%;width:min(100cqw,calc((100cqh - 12px) * var(--ar) + 12px))}
+.fitbox>.frame,.dref>.frame{box-sizing:border-box}
+.dside{display:flex;flex-direction:column;gap:12px;min-height:0;min-width:0;overflow:auto}
+.dref{display:flex;flex-direction:column;gap:6px;align-items:center}
+.dref>.frame{width:min(100%,calc(30dvh * var(--ar) + 12px))}
+.dref .hint,.dref .refmeta{align-self:stretch;margin:0}
+.dref .hint .short{display:none}
+.refmeta{display:flex;gap:8px;align-items:center}
+.refmeta .mini{width:40px}
 .dpalette,.dbrush{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:10px;min-width:0}
-.dpalette{grid-area:palette;max-height:62vh;overflow:auto}
-.dbrush{grid-area:brush;align-self:start}
 .dbtns{display:flex;flex-wrap:wrap;gap:8px}
 .dpalette .otherbox{border-top:1px dashed var(--line);padding-top:10px}
-.refmeta{display:flex;gap:8px;align-items:center}
-.refmeta .mini{width:44px}
 @media (orientation:portrait),(max-width:720px){
   .dwrap{height:calc(100dvh - 24px);gap:8px}
   .dbar{gap:8px}
   .dbar .dname{display:none}
   .dbar .snd,.dbar #done{padding:8px 10px;font-size:13px}
   .dbar .timer output{font-size:20px}
-  .dmain,.dmain.widetile{gap:8px;grid-template-columns:minmax(0,30%) minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;
-    grid-template-areas:"ref palette" "canvas canvas" "brush brush"}
-  .dref .refbox{container-type:normal;flex:none;gap:4px}
-  .dref .refbox>.frame{width:100%;padding:4px!important}
-  .dref .hint{font-size:11px;line-height:1.35;margin:0}
+  .dmain{display:grid;gap:8px;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}
+  .dcanvas{flex:none}
+  .dside{display:grid;overflow:visible;gap:8px;grid-template-columns:minmax(0,30%) minmax(0,1fr);
+    grid-template-areas:"ref palette" "ref brush";align-items:start}
+  .dref{grid-area:ref;gap:4px}
+  .dref>.frame{width:100%;padding:4px!important}
+  .dref .hint{font-size:11px;line-height:1.35}
   .dref .hint .long{display:none}.dref .hint .short{display:inline}
-  .dpalette{align-self:start}
   .dref .refmeta{display:none}
-  .dpalette{padding:8px;max-height:38vh}
+  .dpalette{grid-area:palette;padding:8px;gap:6px;max-height:30vh;overflow:auto}
   .dpalette .sw{width:28px;height:28px}
-  .dbrush{flex-direction:row;align-items:center;justify-content:space-between;flex-wrap:nowrap;padding:0;gap:6px;background:none;border:0}
+  .dbrush{grid-area:brush;padding:0;gap:6px;background:none;border:0}
   .dbrush .sizes{gap:4px}
-  .dbrush .sizes button{width:34px;height:38px}
+  .dbrush .sizes button{width:36px;height:36px}
   .dbtns{gap:4px;flex-wrap:nowrap}
-  .dbtns button{padding:8px 9px;font-size:13px;white-space:nowrap}
+  .dbtns button{padding:7px 8px;font-size:12px;white-space:nowrap;flex:1 1 auto}
 }
 .hint{font-size:12px;color:var(--muted)}
 
@@ -1113,28 +1110,28 @@ function drawCell(cell,k,total,done){
       ${sndButton()}
       <button class="primary" id="done">${k+1<total?"このマスを完成":"描き終える"}</button>
     </div>
-    <div class="dmain${FW>FH*1.1?" widetile":""}">
-      <div class="dref">
-        <div class="fitbox refbox">${refBox}
+    <div class="dmain">
+      <div class="fitbox dcanvas" style="--car:${FW/FH}">${padBox}</div>
+      <div class="dside">
+        <div class="dref">${refBox}
           <p class="hint"><span class="long">お手本をタップすると、その場所の色に切り替わります</span><span class="short">タップで色を拾えます</span></p>
           <div class="refmeta"><div class="mini"><img class="pix" src="${w.src}" alt="" style="aspect-ratio:${ar}"><div class="hl" style="left:${c*100/N}%;top:${r*100/N}%;width:${100/N}%;height:${100/N}%"></div></div><span class="label">お手本 ${cellName(cell,N)} の位置</span></div>
         </div>
-      </div>
-      <div class="fitbox dcanvas">${padBox}</div>
-      <div class="dpalette">
-        <span class="label">このマスの絵の具 · ${local.length}色</span>
-        <div class="swatches">${local.map(swatch).join("")}${others.length?`<button class="more" id="more" aria-expanded="false">ほかの色 +${others.length}</button>`:""}</div>
-        <div class="otherbox" id="otherbox" hidden>
-          <span class="label">ほかの色(このマスにはほとんど出てこない色)</span>
-          ${colorFamilies(others).map(f=>`<div class="famrow"><span class="famname">${f.name}</span><div class="swatches">${f.colors.map(swatch).join("")}</div></div>`).join("")}
+        <div class="dpalette">
+          <span class="label">このマスの絵の具 · ${local.length}色</span>
+          <div class="swatches">${local.map(swatch).join("")}${others.length?`<button class="more" id="more" aria-expanded="false">ほかの色 +${others.length}</button>`:""}</div>
+          <div class="otherbox" id="otherbox" hidden>
+            <span class="label">ほかの色(このマスにはほとんど出てこない色)</span>
+            ${colorFamilies(others).map(f=>`<div class="famrow"><span class="famname">${f.name}</span><div class="swatches">${f.colors.map(swatch).join("")}</div></div>`).join("")}
+          </div>
         </div>
-      </div>
-      <div class="dbrush">
-        <div class="sizes" id="sizes">${sizes.map((s,i)=>`<button data-s="${s}" aria-label="太さ ${s}ドット" aria-pressed="${i===1}"><i style="width:${[3,7,13,22][i]}px;height:${[3,7,13,22][i]}px"></i></button>`).join("")}</div>
-        <div class="dbtns">
-          ${G.guide?`<button class="tool" id="guideBtn" aria-pressed="${G.guideShown}">補助線</button>`:""}
-          <button class="tool" id="bucket" aria-pressed="false">バケツ</button>
-          <button id="undo">元に戻す</button>
+        <div class="dbrush">
+          <div class="sizes" id="sizes">${sizes.map((s,i)=>`<button data-s="${s}" aria-label="太さ ${s}ドット" aria-pressed="${i===1}"><i style="width:${[3,7,13,22][i]}px;height:${[3,7,13,22][i]}px"></i></button>`).join("")}</div>
+          <div class="dbtns">
+            ${G.guide?`<button class="tool" id="guideBtn" aria-pressed="${G.guideShown}">補助線</button>`:""}
+            <button class="tool" id="bucket" aria-pressed="false">バケツ</button>
+            <button id="undo">元に戻す</button>
+          </div>
         </div>
       </div>
     </div>
