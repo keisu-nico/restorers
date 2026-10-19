@@ -465,7 +465,7 @@ function renderHome(msg=""){
   <header style="display:flex;flex-direction:column;gap:6px">
     <span class="eyebrow">オンライン版 · 2〜8人</span>
     <h1>修復士たちの懸命な努力</h1>
-    <p class="muted" style="max-width:40em">名画のマスを全員で同時に修復し、原画にまぎれた下手な筆を探し当てるゲームです。部屋を作った人のブラウザがホストになります。</p>
+    <p class="muted" style="max-width:40em">名画のマスを全員で同時に修復し、修復されたマスを探し当てるゲームです。部屋を作った人のブラウザがホストになります。</p>
   </header>
   <div class="panel" style="max-width:420px">
     <label class="field" for="myname"><span class="label">あなたの名前</span>
@@ -1040,7 +1040,7 @@ function renderLobby(){
         <ol>
           <li>全員が同時に、割り当てられたマスを1マスずつ制限時間内に模写します。</li>
           <li>全員が描き終えると、原画と手描きのマスが混ざった合作が公開されます。</li>
-          <li>合作は5秒間公開されたあと推理に移ります。自分以外の人が描いたと思うマスを、30秒以内に決められた枚数だけ選びます。</li>
+          <li>合作は5秒間公開されたあと推理に移ります。自分以外の人が描いたと思うマスを、25秒以内に決められた枚数だけ選びます。</li>
           <li>得点:手描きのマスを当てるたびに+1点。自分のマスを見逃した人1人につき、1マスごとに+1点。</li>
         </ol>
       </div>
@@ -1095,7 +1095,7 @@ function drawCell(cell,k,total,done){
   const swatch=col=>`<button class="sw" style="background:${col}" data-c="${col}" aria-label="色 ${col}" aria-pressed="false"></button>`;
   // On upright phones the neighbour ring is thinner so the drawable tile gets more of the narrow screen
   const narrow=matchMedia("(orientation:portrait),(max-width:720px)").matches;
-  const m=G.peek?Math.round(Math.min(cw,ch)*(narrow?.1:.18)):0,FW=cw+2*m,FH=ch+2*m;
+  const m=G.peek?Math.round(Math.min(cw,ch)*(narrow?.07:.12)):0,FW=cw+2*m,FH=ch+2*m;
   const place=`left:${m/FW*100}%;top:${m/FH*100}%;width:${cw/FW*100}%;height:${ch/FH*100}%`;
   const padBox=`<div class="frame" style="padding:6px;--ar:${FW/FH};background:#3a2e22"><div class="inner box${m?" peek":""}" style="aspect-ratio:${FW}/${FH}">
       ${m?`<canvas class="pix ctx" width="${FW}" height="${FH}"></canvas>`:""}
@@ -1289,7 +1289,7 @@ function timerFx(){
 
 /* ---------- Phase timers ---------- */
 const RANK_STEP=.8; // seconds between result rows
-const REVEAL_SECONDS=5,GUESS_SECONDS=30;
+const REVEAL_SECONDS=5,GUESS_SECONDS=25;
 // Runs a countdown on the shared timer: tick(msLeft) on every beat, end() once at zero
 function countdown(ms,tick,end){
   clearInterval(timerId);const t0=Date.now();let over=false;
