@@ -158,6 +158,13 @@ td.rank{font-family:var(--display);font-weight:800;white-space:nowrap;text-align
   box-shadow:0 10px 30px rgba(0,0,0,.5);animation:toast 2.2s ease both;pointer-events:none}
 @keyframes toast{0%{opacity:0;transform:translate(-50%,-12px)}12%{opacity:1;transform:translate(-50%,0)}80%{opacity:1}100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){.toast{animation:none}}
+.toast.ok{background:var(--gilt)}
+/* Result sharing */
+.sharebox{display:flex;flex-direction:column;gap:8px;border-top:1px solid var(--line);padding-top:14px}
+.sharebar{gap:8px}
+.btnlink{display:inline-flex;align-items:center;font-size:15px;border-radius:6px;border:1px solid var(--line);background:var(--wall-2);color:var(--ink);padding:10px 16px;text-decoration:none}
+.btnlink:hover{border-color:var(--gilt)}
+.btnlink:focus-visible{outline:2px solid var(--gilt);outline-offset:2px}
 /* Automatic countdowns (no button) */
 .countdown{margin:0;font-size:15px;color:var(--muted);display:flex;align-items:baseline;gap:8px;justify-content:center}
 .countdown b{font-family:var(--display);font-size:40px;font-weight:800;color:var(--gilt);font-variant-numeric:tabular-nums;min-width:1.2ch;text-align:center}
@@ -1266,8 +1273,8 @@ const sfx=(()=>{
 })();
 addEventListener("click",e=>{if(e.target.closest&&e.target.closest(".snd"))sfx.toggle()});
 const sndButton=()=>`<button class="tool snd" aria-pressed="${!sfx.muted}" title="カウントダウンの音">${sfx.muted?"音 オフ":"音 オン"}</button>`;
-function toast(text){
-  const t=document.createElement("div");t.className="toast";t.setAttribute("role","status");t.textContent=text;
+function toast(text,ok){
+  const t=document.createElement("div");t.className="toast"+(ok?" ok":"");t.setAttribute("role","status");t.textContent=text;
   document.body.appendChild(t);setTimeout(()=>t.remove(),2200);
 }
 // Feed it the milliseconds left on any timer: a bell and message at 15s, then a tick every second from 10s
@@ -1345,6 +1352,109 @@ function renderGuess(){
   const stop=countdown(total,l=>{left=l;paintTimer(l,total);fx(l)},submit);
 }
 
+/* ---------- Result image (save / share / post) ---------- */
+// One card: the finished painting in its gilt frame with the ranking beside it (portrait paintings)
+// or under it (landscape paintings). Grid lines, names and tile labels follow the result view toggles.
+const GAME_TITLE="修復士たちの懸命な努力";
+const CARD={bg:"#1c1611",panel:"#30261d",line:"#4a3b2c",ink:"#f0e6d2",muted:"#b4a486",gilt:"#cfa65b",
+  disp:'"Shippori Mincho B1","Hiragino Mincho ProN","Yu Mincho",serif',body:'"Zen Kaku Gothic New","Hiragino Sans","Yu Gothic",system-ui,sans-serif'};
+const loadImg=src=>new Promise(res=>{const im=new Image();im.onload=()=>res(im);im.onerror=()=>res(null);im.src=src});
+function rankRows(rows){return rows.slice().sort((a,b)=>b.total-a.total).map(r=>({...r,rank:1+rows.filter(x=>x.total>r.total).length}))}
+function shareText(d){
+  const ranked=rankRows(d.rows),top=ranked.filter(r=>r.rank===1);
+  return `『${d.work.title}』を${d.names.length}人で修復しました。1位は${top.map(r=>r.name).join("・")}(${top[0]?top[0].total:0}点)! #${GAME_TITLE}`;
+}
+function rr(x,c,X,Y,W,H,R){c.beginPath();c.moveTo(X+R,Y);c.arcTo(X+W,Y,X+W,Y+H,R);c.arcTo(X+W,Y+H,X,Y+H,R);c.arcTo(X,Y+H,X,Y,R);c.arcTo(X,Y,X+W,Y,R);c.closePath()}
+async function buildResultCard(d){
+  // d: {work,N,tiles,owner,names,rows,view,credit}
+  try{await Promise.all([`800 40px ${CARD.disp}`,`700 24px ${CARD.body}`,`400 18px ${CARD.body}`].map(f=>document.fonts.load(f)))}catch(e){}
+  const w=d.work,N=d.N,cw=w.w/N,ch=w.h/N;
+  const imgs=await Promise.all(d.tiles.map(loadImg));
+  const ranked=rankRows(d.rows);
+  const P=48,FR=16,HEAD=96,FOOT=72,side=w.w<=w.h,PANEL=460,ROW=58;
+  const listH=134+ranked.length*ROW;
+  const W=side?P+FR*2+w.w+40+PANEL+P:P+FR*2+w.w+P;
+  const H=side?Math.max(P+HEAD+FR*2+w.h,P+HEAD+listH)+FOOT+P/2:P+HEAD+FR*2+w.h+32+listH+FOOT;
+  const c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");
+  x.fillStyle=CARD.bg;x.fillRect(0,0,W,H);
+  const glow=x.createRadialGradient(W/2,-H*.1,0,W/2,-H*.1,H*.9);glow.addColorStop(0,"rgba(90,70,50,.55)");glow.addColorStop(1,"rgba(0,0,0,0)");
+  x.fillStyle=glow;x.fillRect(0,0,W,H);
+  // Header
+  x.textBaseline="alphabetic";
+  x.fillStyle=CARD.gilt;x.font=`700 20px ${CARD.body}`;x.fillText(GAME_TITLE.split("").join(String.fromCharCode(8202)),P,P+20);
+  x.fillStyle=CARD.ink;x.font=`800 40px ${CARD.disp}`;x.fillText(`『${w.title}』の修復結果`,P,P+70);
+  // Frame and painting
+  const fx=P,fy=P+HEAD,px=fx+FR,py=fy+FR;
+  const gold=x.createLinearGradient(fx,fy,fx+w.w+FR*2,fy+w.h+FR*2);
+  [[0,"#8a6a35"],[.3,"#d8b56e"],[.55,"#7a5a2a"],[.8,"#c9a258"],[1,"#6e5124"]].forEach(([o,col])=>gold.addColorStop(o,col));
+  x.shadowColor="rgba(0,0,0,.55)";x.shadowBlur=30;x.shadowOffsetY=14;x.fillStyle=gold;x.fillRect(fx,fy,w.w+FR*2,w.h+FR*2);
+  x.shadowColor="transparent";x.shadowBlur=0;x.shadowOffsetY=0;
+  x.imageSmoothingEnabled=false;
+  imgs.forEach((im,i)=>{if(im)x.drawImage(im,px+(i%N)*cw,py+Math.floor(i/N)*ch,cw,ch)});
+  if(d.view.lines){x.strokeStyle="rgba(0,0,0,.35)";x.lineWidth=1;
+    for(let k=1;k<N;k++){x.beginPath();x.moveTo(px+k*cw+.5,py);x.lineTo(px+k*cw+.5,py+w.h);x.stroke();x.beginPath();x.moveTo(px,py+k*ch+.5);x.lineTo(px+w.w,py+k*ch+.5);x.stroke()}}
+  const fs=Math.max(11,Math.round(cw*.085));
+  d.owner.forEach((o,i)=>{const tx=px+(i%N)*cw,ty=py+Math.floor(i/N)*ch;
+    if(d.view.coords){x.font=`700 ${Math.max(10,fs-3)}px ${CARD.body}`;x.fillStyle="#fff";x.shadowColor="#000";x.shadowBlur=3;
+      x.fillText(LETTERS[i%N]+(Math.floor(i/N)+1),tx+5,ty+fs+1);x.shadowBlur=0;x.shadowColor="transparent"}
+    if(d.view.names&&o>=0){const name=d.names[o];x.font=`700 ${fs}px ${CARD.body}`;
+      const tw=Math.min(cw-10,x.measureText(name).width+12),th=fs+8;
+      x.fillStyle=PLAYER_COLORS[o%8];rr(x,x,tx+5,ty+ch-th-5,tw,th,4);x.fill();
+      x.save();x.beginPath();x.rect(tx+5,ty+ch-th-5,tw,th);x.clip();x.fillStyle="#111";x.fillText(name,tx+11,ty+ch-10);x.restore()}
+  });
+  // Ranking panel
+  const lx=side?px+w.w+FR+40:P,ly=side?P+HEAD:py+w.h+FR+32,lw=side?PANEL:W-P*2;
+  x.fillStyle=CARD.panel;rr(x,x,lx,ly,lw,listH,12);x.fill();x.strokeStyle=CARD.line;x.lineWidth=1.5;x.stroke();
+  x.fillStyle=CARD.muted;x.font=`400 18px ${CARD.body}`;
+  x.fillText(`${w.artist} / ${w.year}`,lx+24,ly+40);
+  x.fillText(`${d.names.length}人の修復士による合作`,lx+24,ly+68);
+  x.fillStyle=CARD.gilt;x.font=`700 16px ${CARD.body}`;x.fillText("順位",lx+24,ly+106);
+  x.textAlign="right";x.fillText("得点",lx+lw-24,ly+106);x.textAlign="left";
+  ranked.forEach((r,k)=>{const y=ly+160+k*ROW;
+    x.strokeStyle=CARD.line;x.beginPath();x.moveTo(lx+20,y-40);x.lineTo(lx+lw-20,y-40);x.stroke();
+    const top=r.rank===1;x.fillStyle=top?CARD.gilt:CARD.ink;
+    x.font=`800 28px ${CARD.disp}`;x.fillText(`${r.rank}位`,lx+24,y);
+    let nx=lx+96;if(top){x.font=`26px ${CARD.body}`;x.fillText("👑",nx,y);nx+=38}
+    x.fillStyle=PLAYER_COLORS[r.i%8];x.beginPath();x.arc(nx+8,y-9,8,0,Math.PI*2);x.fill();
+    x.fillStyle=top?CARD.gilt:CARD.ink;x.font=`700 24px ${CARD.body}`;
+    const maxName=lx+lw-24-90-(nx+26);let nm=r.name;while(x.measureText(nm).width>maxName&&nm.length>1)nm=nm.slice(0,-1);
+    x.fillText(nm===r.name?nm:nm+"…",nx+26,y);
+    x.textAlign="right";x.font=`800 30px ${CARD.disp}`;x.fillText(`${r.total}`,lx+lw-56,y);
+    x.font=`400 16px ${CARD.body}`;x.fillText("点",lx+lw-24,y);x.textAlign="left";
+  });
+  // Footer
+  x.fillStyle=CARD.muted;x.font=`400 16px ${CARD.body}`;
+  x.fillText(d.credit,P,H-P/2-4);
+  return new Promise(res=>c.toBlob(b=>res(b),"image/png"));
+}
+const cardName=d=>{const t=new Date(),z=n=>String(n).padStart(2,"0");
+  return `shufukushi-${d.work.id}-${t.getFullYear()}${z(t.getMonth()+1)}${z(t.getDate())}-${z(t.getHours())}${z(t.getMinutes())}.png`};
+
+// Online: save directly, share with the image on phones, post text + link to X
+function cardData(){return{work:G.work,N:G.N,tiles:G.board,owner:G.owner,names:G.players.map(p=>p.name),rows:score(),view:G.view,
+  credit:`${GAME_TITLE} · ${(location.host+location.pathname).replace(/\/(index\.html)?$/,"")}`}}
+const gameURL=()=>location.origin+location.pathname;
+const canShareFiles=()=>{try{return!!(navigator.canShare&&navigator.canShare({files:[new File(["x"],"a.png",{type:"image/png"})]}))}catch(e){return false}};
+// Phones only open the share sheet straight after a tap, so the image is prepared ahead of time
+function prepareCard(){const d=cardData();G.card={d,promise:buildResultCard(d).then(b=>(G.card&&G.card.d===d&&(G.card.blob=b),b))};return G.card.promise}
+function shareBarHTML(){
+  const xUrl=`https://x.com/intent/post?text=${encodeURIComponent(shareText(cardData()))}&url=${encodeURIComponent(gameURL())}`;
+  return `<div class="row sharebar"><button class="primary" id="saveImg">画像を保存</button>${canShareFiles()?`<button id="shareImg">画像付きで共有</button>`:""}<a class="btnlink" href="${esc(xUrl)}" target="_blank" rel="noopener">Xに投稿</a></div>`;
+}
+function bindShareBar(){
+  prepareCard();
+  const save=document.getElementById("saveImg");
+  save.onclick=async()=>{save.disabled=true;
+    try{const blob=G.card.blob||await G.card.promise,u=URL.createObjectURL(blob),a=document.createElement("a");
+      a.href=u;a.download=cardName(G.card.d);document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),10000);toast("画像を保存しました",true)}
+    catch(e){toast("画像を作れませんでした")}save.disabled=false};
+  const sh=document.getElementById("shareImg");
+  if(sh)sh.onclick=async()=>{
+    const blob=G.card.blob||await G.card.promise;
+    const file=new File([blob],cardName(G.card.d),{type:"image/png"});
+    try{await navigator.share({files:[file],text:shareText(G.card.d)+" "+gameURL()})}catch(e){if(e&&e.name!=="AbortError")toast("共有できませんでした。「画像を保存」を使ってください")}};
+}
+
 /* ---------- Result ---------- */
 // Result board view toggles: grid lines, names and judgements, tile labels
 const VIEW_ITEMS=[["lines","マスの線"],["names","名前と判定"],["coords","マス名"]];
@@ -1353,7 +1463,7 @@ const viewBar=()=>`<div class="seg viewbar">${VIEW_ITEMS.map(([k,label])=>`<butt
 function bindViewBar(){
   document.querySelectorAll("[data-view]").forEach(b=>b.onclick=()=>{const k=b.dataset.view;G.view[k]=!G.view[k];
     b.setAttribute("aria-pressed",String(G.view[k]));b.querySelector(".sw-state").textContent=G.view[k]?"オン":"オフ";
-    document.getElementById("resultBoard").className="boardwrap "+viewClass()});
+    document.getElementById("resultBoard").className="boardwrap "+viewClass();prepareCard()});
 }
 
 function score(){
@@ -1391,13 +1501,18 @@ function renderResult(showOriginal=false){
           return `<tr class="${r.total===best?"top":""}${animate?" rise":""}" style="${animate?`animation-delay:${delay}s`:""}"><td class="rank">${rank}位</td><td>${rank===1?`<span class="crown" style="${animate?`animation-delay:${delay+.45}s`:""}" aria-hidden="true">👑</span>`:""}${dot(r.i)} ${esc(r.name)}${r.i===G.me?"(あなた)":""}</td><td>${r.hit}</td><td>${r.hidden}</td><td class="total">${r.total}</td></tr>`}).join("")}</tbody>
       </table></div>
       <p class="hint">的中:選んだマスのうち手描きだった数(+1点ずつ)/ 逃げ切り:自分のマスを選ばなかった人の数を、担当マスごとに合計(+1点ずつ)</p>
+      <div class="sharebox">
+        <span class="label">結果を残す</span>
+        ${shareBarHTML()}
+        <p class="hint">画像は、絵の下にある表示切り替え(マスの線・名前と判定・マス名)の状態で作られます。</p>
+      </div>
       <div class="row">
         ${host?`<button class="primary" id="again">ロビーに戻って次のゲームへ</button>`:`<p class="muted">ホストが次のゲームを準備するまでお待ちください。</p>`}
         <button id="leave">部屋を出る</button>
       </div>
     </div>
   </section>`);
-  document.getElementById("cmp").onclick=()=>renderResult(!showOriginal);bindViewBar();
+  document.getElementById("cmp").onclick=()=>renderResult(!showOriginal);bindViewBar();bindShareBar();
   if(host)document.getElementById("again").onclick=hostBackToLobby;
   document.getElementById("leave").onclick=leaveRoom;
 }
