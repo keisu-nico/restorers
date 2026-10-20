@@ -115,8 +115,9 @@ input,select{font-family:var(--body);font-size:15px;background:var(--wall);color
 .sw-state{font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px;background:var(--line);color:var(--muted)}
 .toggle[aria-pressed="true"]{border-color:var(--gilt);background:var(--sel);box-shadow:0 0 0 1px var(--gilt)}
 .toggle[aria-pressed="true"] .sw-state{background:var(--gilt);color:var(--gilt-ink)}
-#ref{cursor:crosshair}
+#ref{cursor:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cg%20stroke%3D%22%23111%22%20stroke-width%3D%221.5%22%20stroke-linejoin%3D%22round%22%20stroke-linecap%3D%22round%22%3E%3Cpath%20d%3D%22M2.5%2021.5%20L3.6%2017.4%20L12.4%208.6%20L15.4%2011.6%20L6.6%2020.4%20Z%22%20fill%3D%22%23fff%22/%3E%3Cpath%20d%3D%22M11%207.2%20L16.8%2013%22%20stroke-width%3D%222.6%22/%3E%3Cpath%20d%3D%22M14.2%209.8%20L18.2%205.8%20A2.4%202.4%200%200%201%2021.6%209.2%20L17.6%2013.2%20Z%22%20fill%3D%22%23333%22/%3E%3C/g%3E%3C/svg%3E") 3 21,crosshair}
 #pad{touch-action:none;cursor:crosshair}
+.box canvas.brushcur{inset:auto;pointer-events:none;z-index:3}
 .refmeta{display:flex;gap:10px;align-items:center}
 .mini{width:64px;flex:none;position:relative;overflow:hidden}
 .mini img{display:block;width:100%;opacity:.75}
@@ -395,6 +396,9 @@ function tileColors(data,palette){
   return used.length?used:[palette[0]];
 }
 const maskCache={};
+// Bucket cursor: a tipped pail whose paint is the color it will pour; the hot spot is the drip
+const BUCKET_SVG='<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><g stroke="#111" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><g transform="rotate(-38 16 15)"><path d="M10 9 C10 2 22 2 22 9" fill="none" stroke-width="2.4"/><path d="M10 9 C10 2 22 2 22 9" fill="none" stroke="#fff" stroke-width="1"/><path d="M9 9 L23 9 L21 24 L11 24 Z" fill="#f4efe6"/><ellipse cx="16" cy="9" rx="7" ry="2.2" fill="COL"/></g><path d="M8.2 12.6 C5 14 3.6 17 3.6 21 C3.6 23.6 6.6 23.6 6.6 21 C6.6 18.5 7.4 16.6 9.8 15.2" fill="COL"/></g></svg>',bucketCurs={};
+function bucketCursor(col){return bucketCurs[col]||(bucketCurs[col]=`url("data:image/svg+xml,${encodeURIComponent(BUCKET_SVG.split("COL").join(col))}") 5 23, cell`)}
 function discSpans(d){
   if(maskCache[d])return maskCache[d];
   const spans=[],r=d/2;
@@ -467,7 +471,7 @@ function hideBanner(){const b=document.getElementById("netbanner");if(b)b.remove
 function track(path,title){try{if(window.goatcounter&&window.goatcounter.count)window.goatcounter.count({path,title:title||path,event:true})}catch(e){}}
 
 /* ---------- Home ---------- */
-const TESTERS=["nikodora","furanka-","maruhoi1","list2","arisaka","Ronmel","savaive","Wilma"];
+const TESTERS=["nikodora","furanka-","maruhoi1","list2","arisaka","Ronmel","savaive","Wilma","cannon6130","y-shin","Tsuru"];
 function renderHome(msg=""){
   screen="home";
   const code=(location.hash.slice(1)||"").toUpperCase().replace(/[^A-Z]/g,"").slice(0,4);
@@ -1131,6 +1135,7 @@ function drawCell(cell,k,total,done){
   const padBox=`<div class="frame" style="padding:6px;--ar:${FW/FH};background:#3a2e22"><div class="inner box${m?" peek":""}" style="aspect-ratio:${FW}/${FH}">
       ${m?`<canvas class="pix ctx" width="${FW}" height="${FH}"></canvas>`:""}
       <canvas class="pix tile" id="pad" width="${cw}" height="${ch}" style="${place}" aria-label="あなたのキャンバス"></canvas>
+      <canvas class="brushcur" id="brushcur" style="${place}" aria-hidden="true"></canvas>
       ${G.guide?`<div class="guide" style="${place}" ${G.guideShown?"":"hidden"}></div>`:""}
     </div></div>`;
   // The reference shows only the tile: the neighbour ring is a drawing aid, so it stays on the canvas side
@@ -1193,15 +1198,16 @@ function drawCell(cell,k,total,done){
   const showOthers=open=>{if(!moreBtn)return;otherBox.hidden=!open;moreBtn.setAttribute("aria-expanded",String(open));
     moreBtn.textContent=open?"ほかの色を閉じる":`ほかの色 +${others.length}`};
   if(moreBtn)moreBtn.onclick=()=>showOthers(otherBox.hidden);
-  const setColor=col=>{color=col;erasing=false;
+  let curHook=()=>{};
+  const setColor=col=>{color=col;erasing=false;curHook();
     swBtns.forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.c===col)));
     if(others.includes(col))showOthers(true)};
   setColor(color);
   swBtns.forEach(b=>b.onclick=()=>setColor(b.dataset.c));
-  document.querySelectorAll("#sizes button").forEach(b=>b.onclick=()=>{size=+b.dataset.s;document.querySelectorAll("#sizes button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)))});
+  document.querySelectorAll("#sizes button").forEach(b=>b.onclick=()=>{size=+b.dataset.s;document.querySelectorAll("#sizes button").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));curHook()});
   // Bucket: fills the connected area of the tapped color with the current paint
   let bucketOn=false;const bucketBtn=document.getElementById("bucket");
-  bucketBtn.onclick=()=>{bucketOn=!bucketOn;bucketBtn.setAttribute("aria-pressed",String(bucketOn))};
+  bucketBtn.onclick=()=>{bucketOn=!bucketOn;bucketBtn.setAttribute("aria-pressed",String(bucketOn));curHook()};
   const bucketFill=(fx,fy)=>{
     const sx=Math.floor(fx),sy=Math.floor(fy);if(sx<0||sy<0||sx>=cw||sy>=ch)return false;
     const img=ctx.getImageData(0,0,cw,ch).data,k0=(sy*cw+sx)*4,tr=img[k0],tg=img[k0+1],tb=img[k0+2];
@@ -1254,6 +1260,32 @@ function drawCell(cell,k,total,done){
     for(const ev of pts.length?pts:[e]){const pt=pos(ev);line(last,pt);last=pt}});
   const end=()=>{drawing=false};
   pad.addEventListener("pointerup",end);pad.addEventListener("pointercancel",end);
+
+  // Pointer preview: outlines exactly the pixels the brush will paint; with the bucket on, a bucket cursor instead
+  const cur=document.getElementById("brushcur"),cx=cur.getContext("2d");let hover=null;
+  const drawCursor=()=>{
+    pad.style.cursor=bucketOn?bucketCursor(erasing?PAPER:color):"none";
+    const bb=cur.getBoundingClientRect(),dpr=window.devicePixelRatio||1,W=Math.max(1,Math.round(bb.width*dpr)),H=Math.max(1,Math.round(bb.height*dpr));
+    if(cur.width!==W||cur.height!==H){cur.width=W;cur.height=H}
+    cx.clearRect(0,0,W,H);
+    if(!hover||bucketOn)return;
+    const ox=Math.round(hover.x-size/2),oy=Math.round(hover.y-size/2),X=v=>Math.round((ox+v)*W/cw),Y=v=>Math.round((oy+v)*H/ch);
+    const on=new Set();
+    cx.globalAlpha=.75;cx.fillStyle=erasing?PAPER:color;
+    for(const [dy,dx,len] of discSpans(size)){cx.fillRect(X(dx),Y(dy),X(dx+len)-X(dx),Y(dy+1)-Y(dy));for(let i=0;i<len;i++)on.add(dy*1024+dx+i)}
+    cx.globalAlpha=1;cx.beginPath();
+    const seg=(a,b,c,d)=>{cx.moveTo(X(a),Y(b));cx.lineTo(X(c),Y(d))};
+    on.forEach(k=>{const py=Math.floor(k/1024),px=k%1024;
+      if(!on.has(k-1024))seg(px,py,px+1,py);if(!on.has(k+1024))seg(px,py+1,px+1,py+1);
+      if(px===0||!on.has(k-1))seg(px,py,px,py+1);if(!on.has(k+1))seg(px+1,py,px+1,py+1)});
+    cx.lineCap="square";cx.strokeStyle="rgba(0,0,0,.85)";cx.lineWidth=3*dpr;cx.stroke();
+    cx.strokeStyle="#fff";cx.lineWidth=1.2*dpr;cx.stroke();
+  };
+  curHook=drawCursor;
+  pad.addEventListener("pointermove",e=>{if(e.pointerType==="touch")return;hover=pos(e);drawCursor()});
+  pad.addEventListener("pointerleave",()=>{hover=null;drawCursor()});
+  pad.addEventListener("pointerdown",e=>{if(e.pointerType==="touch"&&hover){hover=null;drawCursor()}});
+  drawCursor();
 
   const t0=performance.now(),limit=G.seconds*1000,fillEl=document.getElementById("barfill"),out=document.getElementById("tleft"),tbox=document.getElementById("timer");
   let finished=false;const fx=timerFx();
